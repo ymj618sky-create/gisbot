@@ -1,0 +1,165 @@
+"""Context builder for assembling agent prompts."""
+
+import base64
+import mimetypes
+import platform
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+
+class ContextBuilder:
+    """Builds the context (system prompt + messages) for the agent."""
+
+    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
+    _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+
+    def __init__(self, workspace: Path):
+        self.workspace = workspace
+
+    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        parts = [self._get_identity()]
+        bootstrap = self._load_bootstrap_files()
+        if bootstrap:
+            parts.append(bootstrap)
+        return "\n\n---\n\n".join(parts)
+
+    def _get_identity(self) -> str:
+        """Get the core identity section."""
+        workspace_path = str(self.workspace.expanduser().resolve())
+        system = platform.system()
+        runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
+
+        platform_policy = ""
+        if system == "Windows":
+            platform_policy = """## Platform Policy (Windows)
+- You are running on Windows. Do not assume GNU tools like `grep`, `sed`, or `awk` exist.
+- Prefer Windows-native commands or file tools when they are more reliable.
+- If terminal output is garbled, retry with UTF-8 output enabled.
+"""
+        else:
+            platform_policy = """## Platform Policy (POSIX)
+- You are running on a POSIX system. Prefer UTF-8 and standard shell tools.
+- Use file tools when they are simpler or more reliable than shell commands.
+"""
+
+        return f"""# GIS AI Agent 🌍
+
+You are a specialized GIS AI assistant for spatial data analysis and visualization.
+
+## Runtime
+{runtime}
+
+## Workspace
+Your workspace is at: {workspace_path}
+- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
+- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
+
+{platform_policy}
+
+## GIS Guidelines
+- ALWAYS check and validate coordinate systems before spatial operations
+- Use EPSG:4326 as default projection
+- LLM generates code only; calculations are done by GIS libraries
+- Validate results: check for empty results, invalid geometries
+- Use projection_checker.enforce_crs() before any spatial operation
+
+## Available Tools
+- buffer, clip, intersect, union, dissolve (proximity & overlay)
+- area, length, centroid, bounds (analysis)
+- spatial_join, point_in_polygon, nearest_neighbor (spatial query)
+- idw, kernel_density, hotspot (interpolation & statistics)
+- read_data, write_data, convert_data (data operations)
+- spawn (create subagent for parallel tasks)
+
+Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
+
+    @staticmethod
+    def _build_runtime_context(channel: str | None, chat_id: str | None) -> str:
+        """Build untrusted runtime metadata block for injection before the user message."""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        tz = time.strftime("%Z") or "UTC"
+        lines = [f"Current Time: {now} ({tz})"]
+        if channel and chat_id:
+            lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
+        return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+
+    def _load_bootstrap_files(self) -> str:
+        """Load all bootstrap files from workspace."""
+        parts = []
+        for filename in self.BOOTSTRAP_FILES:
+            file_path = self.workspace / filename
+            if file_path.exists():
+                content = file_path.read_text(encoding="utf-8")
+                parts.append(f"## {filename}\n\n{content}")
+        return "\n\n".join(parts) if parts else ""
+
+    def build_messages(
+        self,
+        history: list[dict[str, Any]],
+        current_message: str,
+        skill_names: list[str] | None = None,
+        media: list[str] | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build the complete message list for an LLM call."""
+        runtime_ctx = self._build_runtime_context(channel, chat_id)
+        user_content = self._build_user_content(current_message, media)
+        if isinstance(user_content, str):
+            merged = f"{runtime_ctx}\n\n{user_content}"
+        else:
+            merged = [{"type": "text", "text": runtime_ctx}] + user_content
+        return [
+            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            *history,
+            {"role": "user", "content": merged},
+        ]
+
+    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
+        """Build user message content with optional base64-encoded images."""
+        if not media:
+            return text
+        images = []
+        for path in media:
+            p = Path(path)
+            if not p.is_file():
+                continue
+            raw = p.read_bytes()
+            mime = mimetypes.guess_type(path)[0]
+            if not mime or not mime.startswith("image/"):
+                continue
+            b64 = base64.b64encode(raw).decode()
+            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+        if not images:
+            return text
+        return images + [{"type": "text", "text": text}]
+
+    def add_tool_result(
+        self, messages: list[dict[str, Any]],
+        tool_call_id: str, tool_name: str, result: str,
+    ) -> list[dict[str, Any]]:
+        """Add a tool result to the message list."""
+        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
+        return messages
+
+    def add_assistant_message(
+        self, messages: list[dict[str, Any]],
+        content: str | None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        reasoning_content: str | None = None,
+        thinking_blocks: list[dict] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Add an assistant message to the message list."""
+        msg: dict[str, Any] = {"role": "assistant", "content": content}
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+        if reasoning_content is not None:
+            msg["reasoning_content"] = reasoning_content
+        if thinking_blocks:
+            msg["thinking_blocks"] = thinking_blocks
+        messages.append(msg)
+        return messages
