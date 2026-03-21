@@ -32,10 +32,14 @@ def get_agent_loop() -> AgentLoop:
         workspace = Path(settings.WORKSPACE_DIR) if hasattr(settings, 'WORKSPACE_DIR') else Path.cwd()
         data_dir = workspace / "data"
 
-        # Initialize components
+        # Initialize components with mock mode for testing if no API key
+        api_key = getattr(settings, 'ANTHROPIC_API_KEY', '')
+        use_mock_mode = not api_key or api_key == "your_anthropic_api_key_here"
+
         provider = AnthropicProvider(
-            api_key=getattr(settings, 'ANTHROPIC_API_KEY', ''),
-            model=getattr(settings, 'ANTHROPIC_MODEL', None)
+            api_key=api_key if not use_mock_mode else "mock_key_for_testing",
+            model=getattr(settings, 'ANTHROPIC_MODEL', None),
+            mock_mode=use_mock_mode
         )
 
         tool_registry = ToolRegistry()

@@ -1,0 +1,57 @@
+{
+  "app": {
+    "name": "GIS Agent",
+    "version": "1.0.0",
+    "description": "AI-powered GIS data analysis agent"
+  },
+  "channels": {
+    "cli": {
+      "enabled": true,
+      "description": "Command line interface"
+    },
+    "web": {
+      "enabled": true,
+      "description": "Web interface"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "claude-3-5-sonnet-20241022",
+      "max_iterations": 15,
+      "memory_window": 50,
+      "temperature": 0.7
+    },
+    "gis_adapter": {
+      "enabled": true,
+      "tools": ["read_data", "write_data", "convert_data", "buffer", "proximity"]
+    }
+  },
+  "tools": {
+    "data": {
+      "read": {
+        "enabled": true,
+        "formats": ["geojson", "shp", "gpkg", "kml"]
+      },
+      "write": {
+        "enabled": true,
+        "formats": ["geojson", "gpkg"]
+      },
+      "convert": {
+        "enabled": true
+      }
+    },
+    "gis": {
+      "buffer": {
+        "enabled": true
+      },
+      "proximity": {
+        "enabled": true
+      }
+    }
+  },
+  "workspace": {
+    "path": "./workspace",
+    "data_path": "./data",
+    "temp_path": "./temp"
+  }
+}

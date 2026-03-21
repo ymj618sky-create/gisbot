@@ -9,10 +9,15 @@ class AnthropicProvider(LLMProvider):
 
     DEFAULT_MODEL = "claude-sonnet-4-20250514"
 
-    def __init__(self, api_key: str | None, model: str | None = None, **kwargs):
+    def __init__(self, api_key: str | None = None, model: str | None = None, **kwargs):
         super().__init__(api_key, model)
         self.model = model or self.DEFAULT_MODEL
-        self._validate_api_key()
+
+        # Allow mock mode without API key for testing
+        self.mock_mode = kwargs.get("mock_mode", False)
+        if not self.mock_mode:
+            self._validate_api_key()
+
         self.max_retries = kwargs.get("max_retries", 3)
 
     @property
