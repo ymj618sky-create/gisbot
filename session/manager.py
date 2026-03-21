@@ -1,10 +1,11 @@
 """Session manager for agent conversations."""
 
-import json
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
+
+from core.utils.json_io import read_json_file, write_json_file
 
 
 class Session:
@@ -135,9 +136,9 @@ class SessionManager:
             return None
 
         try:
-            data = json.loads(session_path.read_text(encoding="utf-8"))
+            data = read_json_file(session_path)
             return Session.from_dict(data)
-        except (json.JSONDecodeError, IOError):
+        except (FileNotFoundError, OSError):
             return None
 
     def get_by_channel_chat_id(self, channel: str, chat_id: str) -> Optional[Session]:
@@ -150,10 +151,7 @@ class SessionManager:
     def save_session(self, session: Session) -> None:
         """Save a session to disk."""
         session_path = self._get_session_path(session.id)
-        session_path.write_text(
-            json.dumps(session.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8"
-        )
+        write_json_file(session_path, session.to_dict())
 
     def delete_session(self, session_id: str) -> None:
         """Delete a session."""
@@ -166,9 +164,9 @@ class SessionManager:
         sessions = []
         for session_file in list(self.data_dir.glob("*.json"))[:limit]:
             try:
-                data = json.loads(session_file.read_text(encoding="utf-8"))
+                data = read_json_file(session_file)
                 sessions.append(Session.from_dict(data))
-            except (json.JSONDecodeError, IOError):
+            except (FileNotFoundError, OSError):
                 continue
         return sessions
 
@@ -181,14 +179,13 @@ class SessionManager:
 
         for session_file in self.data_dir.glob("*.json"):
             try:
-                created_at = datetime.fromisoformat(
-                    json.loads(session_file.read_text())["created_at"]
-                ).timestamp()
+                data = read_json_file(session_file)
+                created_at = datetime.fromisoformat(data["created_at"]).timestamp()
 
                 if created_at < cutoff:
                     session_file.unlink()
                     deleted += 1
-            except (json.JSONDecodeError, IOError, ValueError, KeyError):
+            except (FileNotFoundError, OSError, ValueError, KeyError):
                 continue
 
         return deleted

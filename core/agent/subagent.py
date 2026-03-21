@@ -1,7 +1,6 @@
 """Subagent Manager for parallel task execution."""
 
 import asyncio
-import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +8,8 @@ from typing import Any, Optional, List
 
 from core.agent.loop import AgentLoop
 from core.tools.registry import ToolRegistry
+from core.constants import TaskStatus
+from core.utils.json_io import read_json_file, write_json_file
 
 
 class SubagentTask:
@@ -19,7 +20,7 @@ class SubagentTask:
         task_id: str,
         prompt: str,
         tool_names: List[str],
-        status: str = "pending",
+        status: TaskStatus | str = TaskStatus.PENDING,
         result: Optional[str] = None,
         error: Optional[str] = None,
         created_at: Optional[str] = None,
@@ -28,7 +29,10 @@ class SubagentTask:
         self.id = task_id
         self.prompt = prompt
         self.tool_names = tool_names
-        self.status = status  # pending, running, completed, failed, cancelled
+        # Convert string to enum if needed
+        if isinstance(status, str):
+            status = TaskStatus(status)
+        self.status = status
         self.result = result
         self.error = error
         self.created_at = created_at or datetime.now().isoformat()
@@ -40,7 +44,7 @@ class SubagentTask:
             "id": self.id,
             "prompt": self.prompt,
             "tool_names": self.tool_names,
-            "status": self.status,
+            "status": self.status.value if isinstance(self.status, TaskStatus) else self.status,
             "result": self.result,
             "error": self.error,
             "created_at": self.created_at,
@@ -50,11 +54,21 @@ class SubagentTask:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SubagentTask":
         """Create task from dictionary."""
+        # Handle legacy string status or new enum value
+        status_value = data.get("status", "pending")
+        if isinstance(status_value, str):
+            try:
+                status = TaskStatus(status_value)
+            except ValueError:
+                status = TaskStatus.PENDING
+        else:
+            status = TaskStatus.PENDING
+
         return cls(
             task_id=data["id"],
             prompt=data["prompt"],
             tool_names=data.get("tool_names", []),
-            status=data.get("status", "pending"),
+            status=status,
             result=data.get("result"),
             error=data.get("error"),
             created_at=data.get("created_at"),
@@ -106,7 +120,7 @@ class SubagentManager:
             task_id=task_id,
             prompt=prompt,
             tool_names=tool_names,
-            status="pending"
+            status=TaskStatus.PENDING
         )
 
         # Save task
@@ -131,7 +145,7 @@ class SubagentManager:
             task_config: Optional task configuration
         """
         # Update status
-        task.status = "running"
+        task.status = TaskStatus.RUNNING
         task.updated_at = datetime.now().isoformat()
         await self._save_task(task)
 
@@ -176,12 +190,12 @@ class SubagentManager:
             await asyncio.sleep(0.1)  # Simulate processing
 
             # Update task with result
-            task.status = "completed"
+            task.status = TaskStatus.COMPLETED
             task.result = f"Task '{task.prompt}' completed with tools: {', '.join(task.tool_names)}"
             task.updated_at = datetime.now().isoformat()
 
         except Exception as e:
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.error = str(e)
             task.updated_at = datetime.now().isoformat()
 
@@ -206,15 +220,15 @@ class SubagentManager:
             async_task.cancel()
             task = await self.get_task(task_id)
             if task:
-                task.status = "cancelled"
+                task.status = TaskStatus.CANCELLED
                 task.updated_at = datetime.now().isoformat()
                 await self._save_task(task)
             return True
         else:
             # Task not running, mark as cancelled anyway
             task = await self.get_task(task_id)
-            if task and task.status in ["pending", "running"]:
-                task.status = "cancelled"
+            if task and task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
+                task.status = TaskStatus.CANCELLED
                 task.updated_at = datetime.now().isoformat()
                 await self._save_task(task)
                 return True
@@ -227,9 +241,9 @@ class SubagentManager:
             return None
 
         try:
-            data = json.loads(task_path.read_text(encoding="utf-8"))
+            data = read_json_file(task_path)
             return SubagentTask.from_dict(data)
-        except (json.JSONDecodeError, IOError):
+        except (FileNotFoundError, OSError):
             return None
 
     async def list_tasks(self, status: Optional[str] = None) -> List[SubagentTask]:
@@ -237,13 +251,18 @@ class SubagentManager:
         tasks = []
         for task_file in self.data_dir.glob("*.json"):
             try:
-                data = json.loads(task_file.read_text(encoding="utf-8"))
+                data = read_json_file(task_file)
                 task = SubagentTask.from_dict(data)
 
-                # Filter by status if specified
-                if status is None or task.status == status:
+                # Filter by status if specified (convert string to enum for comparison)
+                if status is None:
                     tasks.append(task)
-            except (json.JSONDecodeError, IOError):
+                else:
+                    # Compare with TaskStatus enum or string value
+                    task_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
+                    if task_status == status:
+                        tasks.append(task)
+            except (FileNotFoundError, OSError):
                 continue
 
         # Sort by created_at (newest first)
@@ -253,10 +272,7 @@ class SubagentManager:
     async def _save_task(self, task: SubagentTask) -> None:
         """Save task to disk."""
         task_path = self._get_task_path(task.id)
-        task_path.write_text(
-            json.dumps(task.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8"
-        )
+        write_json_file(task_path, task.to_dict())
 
     async def delete_task(self, task_id: str) -> bool:
         """Delete a task."""
@@ -283,13 +299,13 @@ class SubagentManager:
 
         for task_file in self.data_dir.glob("*.json"):
             try:
-                data = json.loads(task_file.read_text())
+                data = read_json_file(task_file)
                 created_at = datetime.fromisoformat(data.get("created_at", "")).timestamp()
 
                 if created_at < cutoff:
                     task_file.unlink()
                     deleted += 1
-            except (json.JSONDecodeError, IOError, ValueError, KeyError):
+            except (FileNotFoundError, OSError, ValueError, KeyError):
                 continue
 
         return deleted

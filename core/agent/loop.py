@@ -1,14 +1,30 @@
 """Agent Loop for processing messages and managing conversations."""
 
 import asyncio
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
+
 from core.agent.context import ContextBuilder
 from core.agent.memory import MemoryStore
 from core.agent.skills import SkillsLoader
 from core.tools.registry import ToolRegistry
 from core.providers.base import LLMProvider
 from session.manager import SessionManager
+
+
+@dataclass
+class AgentLoopConfig:
+    """Configuration for AgentLoop."""
+
+    max_iterations: int = 15
+    memory_window: int = 50
+
+    # Optional components (will use defaults if None)
+    context_builder: Optional[ContextBuilder] = None
+    skills_loader: Optional[SkillsLoader] = None
+    memory_store: Optional[MemoryStore] = None
 
 
 class AgentLoop:
@@ -22,12 +38,17 @@ class AgentLoop:
     4. Process results and return response
     """
 
+    # Cache for expensive operations
+    _skills_summary: str | None = None
+    _tools_definitions: list[dict[str, Any]] | None = None
+
     def __init__(
         self,
         workspace: Path,
         provider: LLMProvider,
         tool_registry: ToolRegistry,
         session_manager: SessionManager,
+        config: Optional[AgentLoopConfig] = None,
         context_builder: Optional[ContextBuilder] = None,
         skills_loader: Optional[SkillsLoader] = None,
         memory_store: Optional[MemoryStore] = None,
@@ -38,11 +59,21 @@ class AgentLoop:
         self.provider = provider
         self.tool_registry = tool_registry
         self.session_manager = session_manager
-        self.context_builder = context_builder or ContextBuilder(workspace)
-        self.skills_loader = skills_loader or SkillsLoader(workspace)
-        self.memory_store = memory_store or MemoryStore(workspace)
-        self.max_iterations = max_iterations
-        self.memory_window = memory_window
+
+        # Support both new config-based and legacy init
+        if config is not None:
+            self.max_iterations = config.max_iterations
+            self.memory_window = config.memory_window
+            self.context_builder = config.context_builder or ContextBuilder(workspace)
+            self.skills_loader = config.skills_loader or SkillsLoader(workspace)
+            self.memory_store = config.memory_store or MemoryStore(workspace)
+        else:
+            # Legacy init path for backward compatibility
+            self.context_builder = context_builder or ContextBuilder(workspace)
+            self.skills_loader = skills_loader or SkillsLoader(workspace)
+            self.memory_store = memory_store or MemoryStore(workspace)
+            self.max_iterations = max_iterations
+            self.memory_window = memory_window
 
     async def process_direct(
         self,
@@ -114,8 +145,16 @@ class AgentLoop:
         # Get current message history (excluding system prompt)
         history = [m for m in session.get_messages() if m.get("role") != "system"]
 
-        # Build context with skills summary
-        skills_summary = self.skills_loader.build_skills_summary()
+        # Use cached skills summary (build once per agent instance)
+        if AgentLoop._skills_summary is None:
+            AgentLoop._skills_summary = self.skills_loader.build_skills_summary()
+        skills_summary = AgentLoop._skills_summary
+
+        # Use cached tool definitions (build once per agent instance)
+        if AgentLoop._tools_definitions is None:
+            AgentLoop._tools_definitions = self.tool_registry.get_definitions()
+        tools = AgentLoop._tools_definitions
+
         skill_names = self.skills_loader.get_always_skills()
 
         # Build messages for LLM
@@ -132,9 +171,6 @@ class AgentLoop:
         if skills_summary:
             system_msg = messages[0]
             system_msg["content"] += f"\n\n{skills_summary}"
-
-        # Get tool definitions
-        tools = self.tool_registry.get_definitions()
 
         # Main loop
         iteration = 0
@@ -183,7 +219,6 @@ class AgentLoop:
                 tool_args_str = tool_call.get("function", {}).get("arguments", "{}")
 
                 try:
-                    import json
                     tool_args = json.loads(tool_args_str)
                 except json.JSONDecodeError:
                     tool_args = {}
@@ -206,11 +241,6 @@ class AgentLoop:
                     "name": tool_name,
                     "content": tool_result
                 })
-
-            # Check for CRS issues in results (GIS-specific)
-            if assistant_response and ("CRS" in assistant_response or "coordinate" in assistant_response.lower()):
-                # CRS was already handled by the tools
-                pass
 
         else:
             # Reached max iterations
