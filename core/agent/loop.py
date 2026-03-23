@@ -202,9 +202,7 @@ class AgentLoop:
         assistant_response = ""
         # Track recent tool calls for loop detection
         recent_tool_calls: list[str] = []
-        # Track if tools were needed in this request
-        tools_needed = False
-        # Track if loop was detected - disable tools for this request
+        # Track if loop was detected - disable tools for remainder of this request
         loop_detected_for_session = False
 
         while iteration < self.max_iterations:
@@ -215,16 +213,14 @@ class AgentLoop:
                     f"Processing (iteration {iteration}/{self.max_iterations})..."
                 )
 
-            # Call LLM - only send tools in first iteration or if tools were previously needed
+            # Call LLM - send tools unless loop was detected
             try:
                 if on_progress:
                     on_progress(
                         f"正在调用模型分析 (迭代 {iteration}/{self.max_iterations})..."
                     )
-                # Performance optimization: only send tools in first iteration
-                # or if tools were already used in this request
-                # Disable tools if loop was detected
-                tools_to_send = tools if (iteration == 1 or tools_needed) and not loop_detected_for_session else None
+                # Always send tools unless loop was detected (simple, reliable approach)
+                tools_to_send = tools if not loop_detected_for_session else None
                 llm_response = await self.provider.chat(
                     messages=messages, tools=tools_to_send
                 )
@@ -279,7 +275,6 @@ class AgentLoop:
                 logger.info(
                     f"Iteration {iteration}: {len(tool_calls)} tool(s) requested: {[tc.get('function', {}).get('name') for tc in tool_calls]}"
                 )
-                tools_needed = True
             else:
                 logger.info(f"Iteration {iteration}: No tool calls, content length: {len(content)}")
 
