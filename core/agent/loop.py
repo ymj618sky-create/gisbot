@@ -60,6 +60,8 @@ class AgentLoop:
         """Reset the class-level cache. Call this when tools or skills change."""
         cls._skills_summary = None
         cls._tools_definitions = None
+        # Also reset context builder cache
+        ContextBuilder.invalidate_bootstrap_cache()
 
     def __init__(
         self,
@@ -165,9 +167,10 @@ class AgentLoop:
         # Get current message history (excluding system prompt)
         history = [m for m in session.get_messages() if m.get("role") != "system"]
 
-        # Use cached tools summary (build once per agent instance)
-        # Note: We build fresh tools each time to ensure latest registrations
-        tools = self.tool_registry.get_definitions()
+        # Use cached tools definitions (build once per process)
+        if AgentLoop._tools_definitions is None:
+            AgentLoop._tools_definitions = self.tool_registry.get_definitions()
+        tools = AgentLoop._tools_definitions
 
         # Use cached skills summary (build once per agent instance)
         if AgentLoop._skills_summary is None:
@@ -199,6 +202,8 @@ class AgentLoop:
         assistant_response = ""
         # Track recent tool calls for loop detection
         recent_tool_calls: list[str] = []
+        # Track if tools were needed in this request
+        tools_needed = False
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -208,14 +213,17 @@ class AgentLoop:
                     f"Processing (iteration {iteration}/{self.max_iterations})..."
                 )
 
-            # Call LLM
+            # Call LLM - only send tools in first iteration or if tools were previously needed
             try:
                 if on_progress:
                     on_progress(
                         f"正在调用模型分析 (迭代 {iteration}/{self.max_iterations})..."
                     )
+                # Performance optimization: only send tools in first iteration
+                # or if tools were already used in this request
+                tools_to_send = tools if iteration == 1 or tools_needed else None
                 llm_response = await self.provider.chat(
-                    messages=messages, tools=tools if tools else None
+                    messages=messages, tools=tools_to_send
                 )
             except Exception as e:
                 error_msg = f"模型调用失败: {str(e)}"
@@ -268,6 +276,7 @@ class AgentLoop:
                 logger.info(
                     f"Iteration {iteration}: {len(tool_calls)} tool(s) requested: {[tc.get('function', {}).get('name') for tc in tool_calls]}"
                 )
+                tools_needed = True
             else:
                 logger.info(f"Iteration {iteration}: No tool calls, content length: {len(content)}")
 

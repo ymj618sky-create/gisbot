@@ -15,9 +15,19 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "HEARTBEAT.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
+    # Cache for bootstrap files to avoid repeated I/O
+    _bootstrap_cache: dict[str, str] = {}
+    _bootstrap_workspace: Path | None = None
+
     def __init__(self, workspace: Path, memory_store: Optional[Any] = None):
         self.workspace = workspace
         self.memory_store = memory_store
+
+    @classmethod
+    def invalidate_bootstrap_cache(cls) -> None:
+        """Clear the bootstrap cache when workspace changes."""
+        cls._bootstrap_cache.clear()
+        cls._bootstrap_workspace = None
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -141,13 +151,29 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
     def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+        """Load all bootstrap files from workspace (cached)."""
+        # Check if workspace changed - invalidate cache if so
+        workspace_resolved = self.workspace.expanduser().resolve()
+        if ContextBuilder._bootstrap_workspace != workspace_resolved:
+            ContextBuilder._bootstrap_cache.clear()
+            ContextBuilder._bootstrap_workspace = workspace_resolved
+
         parts = []
-        for filename in self.BOOTSTRAP_FILES:
+        for filename in ContextBuilder.BOOTSTRAP_FILES:
+            # Check cache first
+            if filename in ContextBuilder._bootstrap_cache:
+                parts.append(ContextBuilder._bootstrap_cache[filename])
+                continue
+
+            # Load from file
             file_path = self.workspace / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
+                formatted = f"## {filename}\n\n{content}"
+                parts.append(formatted)
+                # Cache for future requests
+                ContextBuilder._bootstrap_cache[filename] = formatted
+
         return "\n\n".join(parts) if parts else ""
 
     def build_messages(
