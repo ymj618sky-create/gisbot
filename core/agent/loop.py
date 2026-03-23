@@ -300,18 +300,8 @@ class AgentLoop:
                 session.add_message(assistant_msg)
                 break
 
-            # Add assistant message to messages for next LLM call
-            # Note: content can be empty if tool_calls are present (nanobot pattern)
-            assistant_msg = {"role": "assistant", "content": content}
-            if tool_calls:
-                assistant_msg["tool_calls"] = tool_calls
-            messages.append(assistant_msg)
-
-            # Also add to session
-            session.add_message(assistant_msg)
-
             # Execute tool calls
-            # Check for loop before executing tools
+            # Check for loop BEFORE adding assistant message (prevents inconsistent state)
             if tool_calls:
                 current_tools = [tc.get('function', {}).get('name') for tc in tool_calls]
                 recent_tool_calls.extend(current_tools)
@@ -332,17 +322,29 @@ class AgentLoop:
                             break
 
                 if loop_detected:
-                    # Add system message to break the loop
+                    # DON'T add the assistant message with tool_calls
+                    # Add system message directly and continue
                     messages.append({
                         "role": "system",
-                        "content": f"工具 {looped_tool} 已被重复调用多次。请使用已获取的工具结果完成任务，不要再调用此工具。"
+                        "content": f"工具 {looped_tool} 已被重复调用多次，已停止执行。请基于已获取的工具结果完成任务，不要再调用此工具。如果工具结果不足以回答问题，请直接告知用户。"
+                    })
+                    session.add_message({
+                        "role": "system",
+                        "content": f"工具 {looped_tool} 已被重复调用多次，已停止执行。请基于已获取的工具结果完成任务，不要再调用此工具。"
                     })
                     # Set flag to disable tools for remainder of this request
                     loop_detected_for_session = True
                     # Clear the tracking
                     recent_tool_calls = []
-                    # Skip tool execution and let LLM respond without tools
+                    # Continue to next iteration
                     continue
+
+            # Only add assistant message if no loop was detected
+            assistant_msg = {"role": "assistant", "content": content}
+            if tool_calls:
+                assistant_msg["tool_calls"] = tool_calls
+            messages.append(assistant_msg)
+            session.add_message(assistant_msg)
 
             for tool_call in tool_calls:
                 tool_name = tool_call.get("function", {}).get("name")
