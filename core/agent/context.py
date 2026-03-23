@@ -6,21 +6,29 @@ import platform
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
+    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "HEARTBEAT.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, memory_store: Optional[Any] = None):
         self.workspace = workspace
+        self.memory_store = memory_store
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
+
+        # Add memory context (nanobot pattern)
+        if self.memory_store:
+            memory = self.memory_store.get_memory_context()
+            if memory:
+                parts.append(memory)
+
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
@@ -60,20 +68,64 @@ Your workspace is at: {workspace_path}
 
 {platform_policy}
 
+## Workspace Policy (CRITICAL)
+- ALL GIS data files MUST be written to or read from the workspace directory
+- When using `write_data`, `read_data`, `convert_data` tools, paths are relative to workspace unless absolute
+- Example: `write_data("data/output.geojson", data)` writes to `{workspace_path}/data/output.geojson`
+- Example: `read_data("data/input.shp")` reads from `{workspace_path}/data/input.shp`
+- NEVER write files to the root directory or outside the workspace
+- Always use `list_files` to check what files exist in the workspace before operations
+
 ## GIS Guidelines
 - ALWAYS check and validate coordinate systems before spatial operations
-- Use EPSG:4326 as default projection
+- Use EPSG:4528 as default projection (CGCS2000 3-degree Gauss-Kruger zone 40)
 - LLM generates code only; calculations are done by GIS libraries
 - Validate results: check for empty results, invalid geometries
 - Use projection_checker.enforce_crs() before any spatial operation
 
 ## Available Tools
-- buffer, clip, intersect, union, dissolve (proximity & overlay)
-- area, length, centroid, bounds (analysis)
-- spatial_join, point_in_polygon, nearest_neighbor (spatial query)
-- idw, kernel_density, hotspot (interpolation & statistics)
-- read_data, write_data, convert_data (data operations)
-- spawn (create subagent for parallel tasks)
+
+### Vector Data Tools
+- read_data: Read GIS vector data files (GeoJSON, Shapefile, GeoPackage, KML, GML, GPX, DXF, File Geodatabase .gdb, Personal Geodatabase .mdb, CSV, etc.)
+- write_data: Write GeoDataFrame to vector file
+- convert_data: Convert between vector GIS formats (supports 40+ formats including .gdb and .mdb)
+
+### Raster Data Tools
+- read_raster: Read raster data files (GeoTIFF, TIFF, IMG, PNG, JPG, ECW, JP2, netCDF, etc.)
+- write_raster: Write raster data to file
+- convert_raster: Convert between raster formats
+
+### Spatial Analysis Tools
+
+### Spatial Analysis Tools (Advanced GIS Analysis)
+- buffer_arcpy: Create buffer zones using ArcPy (supports side options, dissolve)
+- clip_arcpy: Clip features by extent using ArcPy
+- intersect_arcpy: Find geometric intersections between layers
+- project_arcpy: Transform coordinate systems (supports EPSG codes)
+- dissolve_arcpy: Aggregate features by attributes with statistics
+- feature_to_raster_arcpy: Convert vector features to raster format
+- raster_to_polygon_arcpy: Convert raster to polygon features
+- spatial_join_arcpy: Join attributes based on spatial relationships
+- run_arcpy: Execute any ArcGIS geoprocessing tool directly
+
+### System Tools (File Operations & Script Execution)
+- list_files: List files and directories (paths relative to workspace)
+- read_file: Read text file contents
+- write_file: Write content to a text file (creates parent directories if needed)
+- edit_file: Edit a file by replacing old_text with new_text
+- exec: Execute shell commands (Windows-safe)
+- run_python: Execute Python scripts with proper environment
+- web_search: Search the web for information
+- web_fetch: Fetch and analyze web content
+
+**Important**: All file paths in system tools are relative to the workspace directory unless specified as absolute paths.
+
+**ArcPy Tools Usage**:
+- ArcPy tools require ArcGIS Pro or ArcMap to be installed
+- Use ArcPy tools for advanced geoprocessing operations with more control
+- For `project_arcpy`, use EPSG codes like "EPSG:4528" (CGCS2000 3-degree GK zone 40) or WKT strings
+- All ArcPy tools automatically handle workspace paths
+- If ArcPy is not available, the tools will return an error message
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
@@ -119,7 +171,9 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             {"role": "user", "content": merged},
         ]
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
+    def _build_user_content(
+        self, text: str, media: list[str] | None
+    ) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
         if not media:
             return text
@@ -133,21 +187,34 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
-            images.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            images.append(
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+            )
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
 
     def add_tool_result(
-        self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: str,
+        self,
+        messages: list[dict[str, Any]],
+        tool_call_id: str,
+        tool_name: str,
+        result: str,
     ) -> list[dict[str, Any]]:
         """Add a tool result to the message list."""
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": tool_name,
+                "content": result,
+            }
+        )
         return messages
 
     def add_assistant_message(
-        self, messages: list[dict[str, Any]],
+        self,
+        messages: list[dict[str, Any]],
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
