@@ -19,11 +19,11 @@ class TestSessionRetrieval:
     ):
         """Test retrieving an existing session."""
         # Create a session via chat
-        test_client.post("/api/nanobot/chat", json=sample_chat_request)
+        test_client.post("/api/chat", json=sample_chat_request)
 
         # Get the session
         response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
 
         assert response.status_code == 200
@@ -42,7 +42,7 @@ class TestSessionRetrieval:
     ):
         """Test that non-existent sessions return 404."""
         response = test_client.get(
-            "/api/nanobot/session/unknown/nonexistent-chat"
+            "/api/session/unknown/nonexistent-chat"
         )
 
         assert response.status_code == 404
@@ -55,10 +55,10 @@ class TestSessionRetrieval:
         chat_id: str
     ):
         """Test that session metadata is included in response."""
-        test_client.post("/api/nanobot/chat", json=sample_chat_request)
+        test_client.post("/api/chat", json=sample_chat_request)
 
         response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
 
         assert response.status_code == 200
@@ -78,17 +78,17 @@ class TestSessionDeletion:
     ):
         """Test deleting an existing session."""
         # Create a session
-        test_client.post("/api/nanobot/chat", json=sample_chat_request)
+        test_client.post("/api/chat", json=sample_chat_request)
 
         # Verify it exists
         get_response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert get_response.status_code == 200
 
         # Delete the session
         delete_response = test_client.delete(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert delete_response.status_code == 200
 
@@ -98,7 +98,7 @@ class TestSessionDeletion:
 
         # Verify it's gone
         get_response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert get_response.status_code == 404
 
@@ -108,7 +108,7 @@ class TestSessionDeletion:
     ):
         """Test that deleting non-existent session returns 404."""
         response = test_client.delete(
-            "/api/nanobot/session/unknown/nonexistent-chat"
+            "/api/session/unknown/nonexistent-chat"
         )
 
         assert response.status_code == 404
@@ -122,7 +122,7 @@ class TestSessionListing:
         test_client: TestClient
     ):
         """Test listing all sessions."""
-        response = test_client.get("/api/nanobot/sessions")
+        response = test_client.get("/api/sessions")
 
         assert response.status_code == 200
 
@@ -146,10 +146,10 @@ class TestSessionListing:
                 "chat_id": f"chat-{i}",
                 "media": None
             }
-            test_client.post("/api/nanobot/chat", json=request)
+            test_client.post("/api/chat", json=request)
 
         # List with limit
-        response = test_client.get("/api/nanobot/sessions?limit=2")
+        response = test_client.get("/api/sessions?limit=2")
 
         assert response.status_code == 200
         data = response.json()
@@ -160,7 +160,7 @@ class TestSessionListing:
         test_client: TestClient
     ):
         """Test that listing has a default limit."""
-        response = test_client.get("/api/nanobot/sessions")
+        response = test_client.get("/api/sessions")
 
         assert response.status_code == 200
         data = response.json()
@@ -174,7 +174,7 @@ class TestSessionListing:
     ):
         """Test listing when no sessions exist."""
         # Create a fresh session manager with no sessions
-        import api.routes.agent_nanobot as nanobot_routes
+        import api.routes.agent as agent_routes
         from core.agent.loop import AgentLoop
         from unittest.mock import patch
 
@@ -197,16 +197,16 @@ class TestSessionListing:
             )
 
         with patch.object(
-            nanobot_routes,
+            agent_routes,
             'get_agent_loop',
             side_effect=mock_get_empty_loop
         ):
             from fastapi import FastAPI
             app = FastAPI()
-            app.include_router(nanobot_routes.router, prefix="/api")
+            app.include_router(agent_routes.router, prefix="/api")
             client = TestClient(app)
 
-            response = client.get("/api/nanobot/sessions")
+            response = client.get("/api/sessions")
             assert response.status_code == 200
             data = response.json()
             assert data["count"] == 0
@@ -226,7 +226,7 @@ class TestSessionLifecycle:
         """Test complete lifecycle: create -> retrieve -> update -> delete."""
         # 1. Create session via chat
         create_response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=sample_chat_request
         )
         assert create_response.status_code == 200
@@ -234,7 +234,7 @@ class TestSessionLifecycle:
 
         # 2. Retrieve session
         get_response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert get_response.status_code == 200
         initial_data = get_response.json()
@@ -245,11 +245,11 @@ class TestSessionLifecycle:
             **sample_chat_request,
             "message": "Second message"
         }
-        test_client.post("/api/nanobot/chat", json=second_request)
+        test_client.post("/api/chat", json=second_request)
 
         # 4. Retrieve updated session
         get_response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert get_response.status_code == 200
         updated_data = get_response.json()
@@ -258,13 +258,13 @@ class TestSessionLifecycle:
 
         # 5. Delete session
         delete_response = test_client.delete(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert delete_response.status_code == 200
 
         # 6. Verify deletion
         get_response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert get_response.status_code == 404
 
@@ -287,22 +287,22 @@ class TestSessionLifecycle:
             "media": None
         }
 
-        test_client.post("/api/nanobot/chat", json=session1)
-        test_client.post("/api/nanobot/chat", json=session2)
+        test_client.post("/api/chat", json=session1)
+        test_client.post("/api/chat", json=session2)
 
         # Verify both exist
-        response1 = test_client.get("/api/nanobot/session/test/session-1")
-        response2 = test_client.get("/api/nanobot/session/test/session-2")
+        response1 = test_client.get("/api/session/test/session-1")
+        response2 = test_client.get("/api/session/test/session-2")
 
         assert response1.status_code == 200
         assert response2.status_code == 200
 
         # Delete one
-        test_client.delete("/api/nanobot/session/test/session-1")
+        test_client.delete("/api/session/test/session-1")
 
         # Verify one is gone, other still exists
-        response1 = test_client.get("/api/nanobot/session/test/session-1")
-        response2 = test_client.get("/api/nanobot/session/test/session-2")
+        response1 = test_client.get("/api/session/test/session-1")
+        response2 = test_client.get("/api/session/test/session-2")
 
         assert response1.status_code == 404
         assert response2.status_code == 200

@@ -17,7 +17,7 @@ class TestChatFlow:
     ):
         """Test that chat endpoint returns a valid response."""
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=sample_chat_request
         )
 
@@ -39,7 +39,7 @@ class TestChatFlow:
         """Test that a new chat creates a session."""
         # Send initial chat
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=sample_chat_request
         )
         assert response.status_code == 200
@@ -49,7 +49,7 @@ class TestChatFlow:
 
         # Verify session exists
         response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert response.status_code == 200
 
@@ -68,7 +68,7 @@ class TestChatFlow:
         """Test that multiple messages maintain conversation context."""
         # First message
         response1 = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=sample_chat_request
         )
         assert response1.status_code == 200
@@ -81,14 +81,14 @@ class TestChatFlow:
             "media": None
         }
         response2 = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=second_request
         )
         assert response2.status_code == 200
 
         # Verify session has 2 messages
         session_response = test_client.get(
-            f"/api/nanobot/session/{channel}/{chat_id}"
+            f"/api/session/{channel}/{chat_id}"
         )
         assert session_response.status_code == 200
         session_data = session_response.json()
@@ -106,7 +106,7 @@ class TestChatFlow:
             "chat_id": "user-123",
             "media": None
         }
-        response1 = test_client.post("/api/nanobot/chat", json=web_chat)
+        response1 = test_client.post("/api/chat", json=web_chat)
         assert response1.status_code == 200
         web_session_id = response1.json()["session_id"]
 
@@ -117,7 +117,7 @@ class TestChatFlow:
             "chat_id": "user-123",
             "media": None
         }
-        response2 = test_client.post("/api/nanobot/chat", json=cli_chat)
+        response2 = test_client.post("/api/chat", json=cli_chat)
         assert response2.status_code == 200
         cli_session_id = response2.json()["session_id"]
 
@@ -131,7 +131,7 @@ class TestChatFlow:
         """Test that required fields are validated."""
         # Missing message
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json={
                 "channel": "test",
                 "chat_id": "test-123"
@@ -141,7 +141,7 @@ class TestChatFlow:
 
         # Missing chat_id
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json={
                 "message": "Hello",
                 "channel": "test"
@@ -161,7 +161,7 @@ class TestChatFlow:
         }
 
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=request_with_media
         )
 
@@ -181,7 +181,7 @@ class TestChatFlow:
         }
 
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=request
         )
 
@@ -201,7 +201,7 @@ class TestChatFlow:
         }
 
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=request
         )
 
@@ -220,7 +220,7 @@ class TestChatFlow:
         }
 
         response = test_client.post(
-            "/api/nanobot/chat",
+            "/api/chat",
             json=request
         )
 
@@ -240,7 +240,7 @@ class TestChatStreaming:
         # Note: TestClient doesn't fully support SSE testing
         # This is a basic connectivity check
         response = test_client.post(
-            f"/api/nanobot/stream/{channel}/{chat_id}",
+            f"/api/stream/{channel}/{chat_id}",
             json={"message": "Hello"}
         )
 

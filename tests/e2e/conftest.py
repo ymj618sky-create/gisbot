@@ -24,7 +24,7 @@ sys.modules['config'] = MagicMock(settings=MagicMock(
     MEMORY_WINDOW=50
 ))
 
-from api.routes.agent_nanobot import router
+from api.routes.agent import router
 from core.agent.loop import AgentLoop
 from core.agent.memory import MemoryStore
 from core.agent.skills import SkillsLoader
@@ -105,15 +105,15 @@ def test_client(agent_loop: AgentLoop) -> TestClient:
     """
     Create FastAPI TestClient with mocked AgentLoop.
 
-    This patches the global _agent_loop singleton in agent_nanobot module.
+    This patches the global _agent_loop singleton in agent module.
     """
-    import api.routes.agent_nanobot as nanobot_routes
+    import api.routes.agent as agent_routes
 
     def mock_get_agent_loop():
         return agent_loop
 
     with patch.object(
-        nanobot_routes,
+        agent_routes,
         'get_agent_loop',
         side_effect=mock_get_agent_loop
     ):
@@ -126,7 +126,7 @@ def test_client(agent_loop: AgentLoop) -> TestClient:
         yield client
 
         # Reset global state
-        nanobot_routes._agent_loop = None
+        agent_routes._agent_loop = None
 
 
 @pytest.fixture

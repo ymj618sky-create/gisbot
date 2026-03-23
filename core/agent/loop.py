@@ -435,28 +435,28 @@ class AgentLoop:
         # Only consolidate if we've accumulated enough new messages
         if (
             unconsolidated >= self.memory_window
-            and session.key not in self._consolidating
         ):
-            session_key = getattr(
-                session, "key", f"{session.channel}:{session.chat_id}"
-            )
-            self._consolidating.add(session_key)
+            # Generate session key from channel and chat_id
+            session_key = f"{session.channel}:{session.chat_id}"
 
-            # Get or create lock for this session
-            lock = self._consolidation_locks.setdefault(session_key, asyncio.Lock())
+            if session_key not in self._consolidating:
+                self._consolidating.add(session_key)
 
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory_async(session)
-                finally:
-                    self._consolidating.discard(session_key)
-                    task = asyncio.current_task()
-                    if task:
-                        self._consolidation_tasks.discard(task)
+                # Get or create lock for this session
+                lock = self._consolidation_locks.setdefault(session_key, asyncio.Lock())
 
-            task = asyncio.create_task(_consolidate_and_unlock())
-            self._consolidation_tasks.add(task)
+                async def _consolidate_and_unlock():
+                    try:
+                        async with lock:
+                            await self._consolidate_memory_async(session)
+                    finally:
+                        self._consolidating.discard(session_key)
+                        task = asyncio.current_task()
+                        if task:
+                            self._consolidation_tasks.discard(task)
+
+                task = asyncio.create_task(_consolidate_and_unlock())
+                self._consolidation_tasks.add(task)
 
     async def _consolidate_memory_async(self, session: Any) -> None:
         """Async memory consolidation (nanobot pattern)."""

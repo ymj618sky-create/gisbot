@@ -15,7 +15,7 @@ class TestToolsAPI:
         test_client: TestClient
     ):
         """Test that tools endpoint returns tool definitions."""
-        response = test_client.get("/api/nanobot/tools")
+        response = test_client.get("/api/tools")
 
         assert response.status_code == 200
 
@@ -32,7 +32,7 @@ class TestToolsAPI:
         test_client: TestClient
     ):
         """Test that each tool has required fields."""
-        response = test_client.get("/api/nanobot/tools")
+        response = test_client.get("/api/tools")
         data = response.json()
 
         for tool in data["tools"]:
@@ -47,7 +47,7 @@ class TestToolsAPI:
         test_client: TestClient
     ):
         """Test that tool parameters have correct structure."""
-        response = test_client.get("/api/nanobot/tools")
+        response = test_client.get("/api/tools")
         data = response.json()
 
         for tool in data["tools"]:
@@ -61,7 +61,7 @@ class TestToolsAPI:
         test_client: TestClient
     ):
         """Test that core GIS tools are registered."""
-        response = test_client.get("/api/nanobot/tools")
+        response = test_client.get("/api/tools")
         data = response.json()
 
         tool_names = [tool["name"] for tool in data["tools"]]
@@ -82,7 +82,7 @@ class TestToolsAPI:
         test_client: TestClient
     ):
         """Test that at least some tools are registered."""
-        response = test_client.get("/api/nanobot/tools")
+        response = test_client.get("/api/tools")
         data = response.json()
 
         assert data["count"] > 0, "No tools registered"
@@ -97,7 +97,7 @@ class TestSkillsAPI:
         test_client: TestClient
     ):
         """Test that skills endpoint returns skill definitions."""
-        response = test_client.get("/api/nanobot/skills")
+        response = test_client.get("/api/skills")
 
         assert response.status_code == 200
 
@@ -114,7 +114,7 @@ class TestSkillsAPI:
         test_client: TestClient
     ):
         """Test that each skill has required fields."""
-        response = test_client.get("/api/nanobot/skills")
+        response = test_client.get("/api/skills")
         data = response.json()
 
         for skill in data["skills"]:
@@ -130,7 +130,7 @@ class TestSkillsAPI:
         test_client: TestClient
     ):
         """Test that skills have valid source values."""
-        response = test_client.get("/api/nanobot/skills")
+        response = test_client.get("/api/skills")
         data = response.json()
 
         for skill in data["skills"]:
@@ -146,7 +146,7 @@ class TestSkillsAPI:
         test_client: TestClient
     ):
         """Test that skills endpoint handles empty skills gracefully."""
-        response = test_client.get("/api/nanobot/skills")
+        response = test_client.get("/api/skills")
 
         assert response.status_code == 200
         data = response.json()
@@ -168,10 +168,10 @@ class TestToolsAndSkillsIntegration:
     ):
         """Test that tools remain available after a chat session."""
         # Send a chat message
-        test_client.post("/api/nanobot/chat", json=sample_chat_request)
+        test_client.post("/api/chat", json=sample_chat_request)
 
         # Tools should still be available
-        response = test_client.get("/api/nanobot/tools")
+        response = test_client.get("/api/tools")
         assert response.status_code == 200
         assert response.json()["count"] > 0
 
@@ -180,8 +180,8 @@ class TestToolsAndSkillsIntegration:
         test_client: TestClient
     ):
         """Test that tools list is consistent across multiple calls."""
-        response1 = test_client.get("/api/nanobot/tools")
-        response2 = test_client.get("/api/nanobot/tools")
+        response1 = test_client.get("/api/tools")
+        response2 = test_client.get("/api/tools")
 
         assert response1.status_code == 200
         assert response2.status_code == 200
@@ -201,9 +201,9 @@ class TestToolsAndSkillsIntegration:
     ):
         """Test that all API endpoints return valid JSON."""
         endpoints = [
-            "/api/nanobot/tools",
-            "/api/nanobot/skills",
-            "/api/nanobot/sessions"
+            "/api/tools",
+            "/api/skills",
+            "/api/sessions"
         ]
 
         for endpoint in endpoints:
@@ -248,7 +248,7 @@ class TestToolParameterValidation:
         agent_loop.provider.chat = mock_chat_with_tools
 
         try:
-            response = test_client.post("/api/nanobot/chat", json=sample_chat_request)
+            response = test_client.post("/api/chat", json=sample_chat_request)
             assert response.status_code == 200
         finally:
             agent_loop.provider.chat = original_chat
@@ -284,7 +284,7 @@ class TestToolParameterValidation:
 
         try:
             # Should handle gracefully, not crash
-            response = test_client.post("/api/nanobot/chat", json=sample_chat_request)
+            response = test_client.post("/api/chat", json=sample_chat_request)
             # Should still return a response (even if tool failed)
             assert response.status_code in [200, 500]
         finally:
@@ -345,7 +345,7 @@ class TestToolExecution:
             agent_loop.provider.chat = mock_chat
 
             try:
-                response = test_client.post("/api/nanobot/chat", json=sample_chat_request)
+                response = test_client.post("/api/chat", json=sample_chat_request)
                 assert response.status_code == 200
 
                 # Verify tool was executed
