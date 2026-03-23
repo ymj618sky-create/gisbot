@@ -140,6 +140,7 @@ class Session:
         sender_id: str,
         memory_window: int = 50,
         last_consolidated: int = 0,
+        project_id: str = "default",
     ):
         self.id = str(uuid.uuid4())
         self.channel = channel
@@ -149,6 +150,7 @@ class Session:
         self.updated_at = datetime.now().isoformat()
         self.memory_window = memory_window
         self.last_consolidated = last_consolidated
+        self.project_id = project_id  # 关联的项目ID
         self.messages: list[dict[str, Any]] = []
         self.metadata: dict[str, Any] = {}
 
@@ -255,6 +257,7 @@ class Session:
             "updated_at": self.updated_at,
             "memory_window": self.memory_window,
             "last_consolidated": self.last_consolidated,
+            "project_id": self.project_id,
             "messages": self.messages,
             "metadata": self.metadata,
             "title": self.title,
@@ -272,6 +275,7 @@ class Session:
             sender_id=data["sender_id"],
             memory_window=data.get("memory_window", 50),
             last_consolidated=data.get("last_consolidated", 0),
+            project_id=data.get("project_id", "default"),
         )
         session.id = data["id"]
         session.created_at = data["created_at"]
@@ -318,7 +322,8 @@ class SessionManager:
         return self._global_memory
 
     def create_session(
-        self, channel: str, chat_id: str, sender_id: str, memory_window: int = 50
+        self, channel: str, chat_id: str, sender_id: str, memory_window: int = 50,
+        project_id: str = "default"
     ) -> Session:
         """Create a new session."""
         session = Session(
@@ -326,6 +331,7 @@ class SessionManager:
             chat_id=chat_id,
             sender_id=sender_id,
             memory_window=memory_window,
+            project_id=project_id,
         )
         self._sessions[session.id] = session
         self.save_session(session)
