@@ -197,6 +197,8 @@ class AgentLoop:
         # Main loop
         iteration = 0
         assistant_response = ""
+        # Track recent tool calls for loop detection
+        recent_tool_calls: list[str] = []
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -267,14 +269,32 @@ class AgentLoop:
                     f"Iteration {iteration}: {len(tool_calls)} tool(s) requested: {[tc.get('function', {}).get('name') for tc in tool_calls]}"
                 )
             else:
-                logger.info(f"Iteration {iteration}: No tool calls, returning response")
+                logger.info(f"Iteration {iteration}: No tool calls, content length: {len(content)}")
+
+            # If no tool calls, return the response immediately
+            if not tool_calls:
+                # Filter out empty responses
+                if not content or not content.strip():
+                    logger.warning(f"Iteration {iteration}: Empty response with no tools")
+                    # Try one more time with a system prompt
+                    if iteration < self.max_iterations:
+                        messages.append({
+                            "role": "system",
+                            "content": "Please provide a direct answer. If you need to use tools, call them explicitly. Don't return empty responses."
+                        })
+                        continue
+                    assistant_response = "抱歉，无法生成响应。请重新提问或提供更具体的信息."
+                else:
+                    assistant_response = content
+
+                # Add assistant message to session before returning
+                assistant_msg = {"role": "assistant", "content": content}
+                messages.append(assistant_msg)
+                session.add_message(assistant_msg)
+                break
 
             # Add assistant message to messages for next LLM call
-            # Filter out empty assistant messages (nanobot pattern)
-            if not content or not content.strip():
-                logger.debug("Skipping empty assistant message")
-                continue
-
+            # Note: content can be empty if tool_calls are present (nanobot pattern)
             assistant_msg = {"role": "assistant", "content": content}
             if tool_calls:
                 assistant_msg["tool_calls"] = tool_calls
@@ -283,12 +303,31 @@ class AgentLoop:
             # Also add to session
             session.add_message(assistant_msg)
 
-            if not tool_calls:
-                # No tool calls, return response
-                assistant_response = content
-                break
-
             # Execute tool calls
+            # Check for loop before executing tools
+            if tool_calls:
+                current_tools = [tc.get('function', {}).get('name') for tc in tool_calls]
+                recent_tool_calls.extend(current_tools)
+                if len(recent_tool_calls) > 10:
+                    recent_tool_calls = recent_tool_calls[-10:]
+
+                # Simple loop detection: if same tool called 3+ times consecutively
+                loop_detected = False
+                for tool_name in current_tools:
+                    if recent_tool_calls[-3:] == [tool_name, tool_name, tool_name]:
+                        logger.warning(f"Detected tool loop: {tool_name} called 3+ times")
+                        # Add a system message to break the loop
+                        messages.append({
+                            "role": "system",
+                            "content": f"工具 {tool_name} 已被重复调用多次。请使用已获取的工具结果完成任务，不要再调用此工具。"
+                        })
+                        loop_detected = True
+                        break
+
+                if loop_detected:
+                    # Skip all tool execution and continue to next iteration
+                    continue
+
             for tool_call in tool_calls:
                 tool_name = tool_call.get("function", {}).get("name")
                 tool_args_str = tool_call.get("function", {}).get("arguments", "{}")
