@@ -489,8 +489,11 @@ class RunPythonScriptTool(Tool):
     def __init__(self, workspace: Path | None = None, timeout: int = 60):
         self.workspace = workspace or Path.cwd()
         self.timeout = timeout
-        # Use configured Python path
-        self.python_path = get_python_path()
+        # Python path is determined at execution time (not cached in __init__)
+
+    def _get_python_path(self) -> str:
+        """Get the Python interpreter path dynamically at execution time."""
+        return get_python_path()
 
     @property
     def name(self) -> str:
@@ -530,17 +533,16 @@ class RunPythonScriptTool(Tool):
             if not script.is_file():
                 return f"Error: Not a file: {script}"
 
+            # Get Python path dynamically at execution time
+            python_path = self._get_python_path()
+            python_exec = Path(python_path)
+
             # Verify Python path exists
-            python_exec = Path(self.python_path)
             if not python_exec.exists():
-                # Try to use system python as fallback
-                self.python_path = "python"
-                python_exec = Path(self.python_path)
-                if not python_exec.exists():
-                    return f"Error: Python interpreter not found at {self.python_path}. Please configure ARCGIS_PRO_PYTHON environment variable."
+                return f"Error: Python interpreter not found at {python_path}. Please configure ARCGIS_PRO_PYTHON environment variable."
 
             # Prepare command - use configured Python path
-            cmd = [self.python_path, str(script)]
+            cmd = [python_path, str(script)]
             if args:
                 cmd.extend(args)
 
@@ -574,7 +576,7 @@ class RunPythonScriptTool(Tool):
 
             result = [
                 f"Script: {display_path}",
-                f"Python: {self.python_path}",
+                f"Python: {python_path}",
                 f"Exit code: {process.returncode}"
             ]
 
