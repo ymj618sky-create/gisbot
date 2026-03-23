@@ -13,6 +13,8 @@ from core.tools.base import Tool
 # Helper function to get configured Python path
 def get_python_path() -> str:
     """Get the configured Python path, falling back to system python."""
+    import sys
+
     # Try to get from environment variable first (loaded from .env)
     python_path = os.environ.get("ARCGIS_PRO_PYTHON", None)
     if python_path and Path(python_path).exists():
@@ -26,7 +28,10 @@ def get_python_path() -> str:
                 return str(check_path)
     except ImportError:
         pass
-    # Fall back to python
+    # Fall back to current Python executable
+    if sys.executable and Path(sys.executable).exists():
+        return sys.executable
+    # Last resort: use "python"
     return "python"
 
 
