@@ -69,11 +69,12 @@ Your workspace is at: {workspace_path}
 {platform_policy}
 
 ## Workspace Policy (CRITICAL)
-- ALL GIS data files MUST be written to or read from the workspace directory
-- When using `write_data`, `read_data`, `convert_data` tools, paths are relative to workspace unless absolute
+- Output files MUST be written to the workspace directory
+- When using `write_data`, `convert_data` tools, paths are relative to workspace
+- When using `read_data` tool, you can use absolute paths to read files outside workspace
 - Example: `write_data("data/output.geojson", data)` writes to `{workspace_path}/data/output.geojson`
 - Example: `read_data("data/input.shp")` reads from `{workspace_path}/data/input.shp`
-- NEVER write files to the root directory or outside the workspace
+- Example: `read_data("C:/path/to/file.shp")` reads from absolute path outside workspace
 - Always use `list_files` to check what files exist in the workspace before operations
 
 ## GIS Guidelines
