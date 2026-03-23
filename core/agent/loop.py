@@ -204,6 +204,8 @@ class AgentLoop:
         recent_tool_calls: list[str] = []
         # Track if tools were needed in this request
         tools_needed = False
+        # Track if loop was detected - disable tools for this request
+        loop_detected_for_session = False
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -221,7 +223,8 @@ class AgentLoop:
                     )
                 # Performance optimization: only send tools in first iteration
                 # or if tools were already used in this request
-                tools_to_send = tools if iteration == 1 or tools_needed else None
+                # Disable tools if loop was detected
+                tools_to_send = tools if (iteration == 1 or tools_needed) and not loop_detected_for_session else None
                 llm_response = await self.provider.chat(
                     messages=messages, tools=tools_to_send
                 )
@@ -322,19 +325,28 @@ class AgentLoop:
 
                 # Simple loop detection: if same tool called 3+ times consecutively
                 loop_detected = False
+                looped_tool = None
                 for tool_name in current_tools:
-                    if recent_tool_calls[-3:] == [tool_name, tool_name, tool_name]:
-                        logger.warning(f"Detected tool loop: {tool_name} called 3+ times")
-                        # Add a system message to break the loop
-                        messages.append({
-                            "role": "system",
-                            "content": f"工具 {tool_name} 已被重复调用多次。请使用已获取的工具结果完成任务，不要再调用此工具。"
-                        })
-                        loop_detected = True
-                        break
+                    # Check last 3 calls
+                    if len(recent_tool_calls) >= 3:
+                        last_three = recent_tool_calls[-3:]
+                        if last_three == [tool_name, tool_name, tool_name]:
+                            logger.warning(f"Detected tool loop: {tool_name} called 3+ times")
+                            looped_tool = tool_name
+                            loop_detected = True
+                            break
 
                 if loop_detected:
-                    # Skip all tool execution and continue to next iteration
+                    # Add system message to break the loop
+                    messages.append({
+                        "role": "system",
+                        "content": f"工具 {looped_tool} 已被重复调用多次。请使用已获取的工具结果完成任务，不要再调用此工具。"
+                    })
+                    # Set flag to disable tools for remainder of this request
+                    loop_detected_for_session = True
+                    # Clear the tracking
+                    recent_tool_calls = []
+                    # Skip tool execution and let LLM respond without tools
                     continue
 
             for tool_call in tool_calls:
