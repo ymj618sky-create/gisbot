@@ -1,32 +1,47 @@
-"""Event definitions for message bus."""
+"""
+MessageBus事件模型
 
+定义消息总线中使用的数据结构
+"""
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
 
 
 @dataclass
 class InboundMessage:
-    """Incoming message from a channel."""
-    channel: str
-    sender_id: str
-    chat_id: str
-    content: str
-    media: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    """入站消息（从通道到Agent）"""
+    channel: str  # 通道名称
+    chat_id: str  # 聊天ID
+    content: str  # 消息内容
+    timestamp: datetime = field(default_factory=datetime.now)  # 时间戳
+    context: dict | None = None  # 上下文信息
+    metadata: dict | None = None  # 元数据
 
-    @property
-    def session_key(self) -> str:
-        """Unique session identifier."""
-        return f"{self.channel}:{self.chat_id}"
+    def model_dump(self) -> dict:
+        """将消息转换为字典"""
+        return {
+            "channel": self.channel,
+            "chat_id": self.chat_id,
+            "content": self.content,
+            "timestamp": self.timestamp.isoformat(),
+            "context": self.context,
+            "metadata": self.metadata,
+        }
 
 
 @dataclass
 class OutboundMessage:
-    """Outgoing message to a channel."""
-    channel: str
-    chat_id: str
-    content: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    """出站消息（从Agent到通道）"""
+    channel: str  # 通道名称
+    chat_id: str  # 聊天ID
+    content: str  # 消息内容
+    message_id: str | None = None  # 消息ID（可选）
+
+    def model_dump(self) -> dict:
+        """将消息转换为字典"""
+        return {
+            "channel": self.channel,
+            "chat_id": self.chat_id,
+            "content": self.content,
+            "message_id": self.message_id,
+        }
