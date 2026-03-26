@@ -1,311 +1,242 @@
-"""Subagent Manager for parallel task execution."""
+"""
+SubagentManager - 子Agent管理器
 
+支持后台并行执行复杂任务，任务分解和结果收集
+"""
 import asyncio
 import uuid
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Optional, List
-
-from core.agent.loop import AgentLoop
-from core.tools.registry import ToolRegistry
-from core.constants import TaskStatus
-from core.utils.json_io import read_json_file, write_json_file
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Dict, Optional
 
 
+class TaskStatus(Enum):
+    """任务状态枚举"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    TIMEOUT = "timeout"
+
+
+@dataclass
 class SubagentTask:
-    """Represents a subagent task."""
-
-    def __init__(
-        self,
-        task_id: str,
-        prompt: str,
-        tool_names: List[str],
-        status: TaskStatus | str = TaskStatus.PENDING,
-        result: Optional[str] = None,
-        error: Optional[str] = None,
-        created_at: Optional[str] = None,
-        updated_at: Optional[str] = None
-    ):
-        self.id = task_id
-        self.prompt = prompt
-        self.tool_names = tool_names
-        # Convert string to enum if needed
-        if isinstance(status, str):
-            status = TaskStatus(status)
-        self.status = status
-        self.result = result
-        self.error = error
-        self.created_at = created_at or datetime.now().isoformat()
-        self.updated_at = updated_at or datetime.now().isoformat()
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert task to dictionary."""
-        return {
-            "id": self.id,
-            "prompt": self.prompt,
-            "tool_names": self.tool_names,
-            "status": self.status.value if isinstance(self.status, TaskStatus) else self.status,
-            "result": self.result,
-            "error": self.error,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SubagentTask":
-        """Create task from dictionary."""
-        # Handle legacy string status or new enum value
-        status_value = data.get("status", "pending")
-        if isinstance(status_value, str):
-            try:
-                status = TaskStatus(status_value)
-            except ValueError:
-                status = TaskStatus.PENDING
-        else:
-            status = TaskStatus.PENDING
-
-        return cls(
-            task_id=data["id"],
-            prompt=data["prompt"],
-            tool_names=data.get("tool_names", []),
-            status=status,
-            result=data.get("result"),
-            error=data.get("error"),
-            created_at=data.get("created_at"),
-            updated_at=data.get("updated_at")
-        )
+    """子Agent任务"""
+    task_id: str  # 任务ID（UUID前8位）
+    prompt: str  # 任务描述
+    status: TaskStatus = TaskStatus.PENDING
+    result: Optional[str] = None  # 执行结果
+    error: Optional[str] = None  # 错误信息
+    created_at: datetime = field(default_factory=datetime.now)
+    started_at: Optional[datetime] = None  # 开始时间
+    completed_at: Optional[datetime] = None  # 完成时间
 
 
 class SubagentManager:
     """
-    Manager for subagent tasks.
+    子Agent管理器
 
-    Subagents are independent agent instances that can execute tasks
-    in parallel. They have restricted tool sets (no spawn, no message)
-    and limited iterations.
+    负责创建、管理和监控后台并行执行的子Agent任务
+    支持任务超时、取消和清理
     """
 
-    def __init__(self, data_dir: Path):
-        self.data_dir = data_dir / "subagent_tasks"
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self._running_tasks: dict[str, asyncio.Task] = {}
-
-    def _get_task_path(self, task_id: str) -> Path:
-        """Get file path for a task."""
-        return self.data_dir / f"{task_id}.json"
-
-    async def create_task(
-        self,
-        task_id: Optional[str] = None,
-        prompt: str = "",
-        tool_names: Optional[List[str]] = None,
-        task_config: Optional[dict[str, Any]] = None
-    ) -> SubagentTask:
+    def __init__(self, timeout: float = 10.0):
         """
-        Create a new subagent task.
+        初始化子Agent管理器
 
         Args:
-            task_id: Optional custom task ID
-            prompt: Task prompt/instructions
-            tool_names: List of tools this subagent can use
-            task_config: Optional task configuration (max_iterations, etc.)
+            timeout: 默认任务超时时间（秒）
+        """
+        self._tasks: Dict[str, SubagentTask] = {}
+        self._task_lock = asyncio.Lock()
+        self._running_tasks: Dict[str, asyncio.Task] = {}
+        self._timeout = timeout
+        self._shutdown_event = asyncio.Event()
+
+    async def spawn(self, prompt: str) -> str:
+        """
+        创建并启动子Agent任务
+
+        Args:
+            prompt: 任务描述
 
         Returns:
-            SubagentTask instance
+            任务ID（UUID前8位）
         """
-        task_id = task_id or str(uuid.uuid4())
-        tool_names = tool_names or []
+        task_id = str(uuid.uuid4())[:8]
 
-        task = SubagentTask(
-            task_id=task_id,
-            prompt=prompt,
-            tool_names=tool_names,
-            status=TaskStatus.PENDING
-        )
+        async with self._task_lock:
+            task = SubagentTask(task_id=task_id, prompt=prompt)
+            self._tasks[task_id] = task
 
-        # Save task
-        await self._save_task(task)
+        # 启动后台任务
+        bg_task = asyncio.create_task(self._run_task(task_id))
+        self._running_tasks[task_id] = bg_task
 
-        return task
-
-    async def execute_task(
-        self,
-        task: SubagentTask,
-        tool_registry: ToolRegistry,
-        agent_loop: Optional[AgentLoop] = None,
-        task_config: Optional[dict[str, Any]] = None
-    ) -> None:
-        """
-        Execute a subagent task asynchronously.
-
-        Args:
-            task: SubagentTask to execute
-            tool_registry: Tool registry with available tools
-            agent_loop: Optional AgentLoop instance
-            task_config: Optional task configuration
-        """
-        # Update status
-        task.status = TaskStatus.RUNNING
-        task.updated_at = datetime.now().isoformat()
-        await self._save_task(task)
-
-        # Create async task
-        async_task = asyncio.create_task(
-            self._run_task(task, tool_registry, agent_loop, task_config)
-        )
-        self._running_tasks[task.id] = async_task
-
-        # Don't wait for completion - let it run in background
-
-    async def _run_task(
-        self,
-        task: SubagentTask,
-        tool_registry: ToolRegistry,
-        agent_loop: Optional[AgentLoop],
-        task_config: Optional[dict[str, Any]]
-    ) -> None:
-        """
-        Actually run the subagent task.
-
-        This method runs in a separate task and updates the task status.
-        """
-        try:
-            # Get task configuration
-            config = task_config or {}
-            max_iterations = config.get("max_iterations", 15)
-
-            # Create a filtered tool registry with only allowed tools
-            filtered_registry = ToolRegistry()
-            for tool_name in task.tool_names:
-                tool = tool_registry.get(tool_name)
-                if tool:
-                    filtered_registry.register(tool)
-
-            # Execute the task
-            # In a real implementation, this would create a new AgentLoop
-            # with the filtered tool registry and execute the prompt
-            # For now, simulate execution
-
-            # Simulate task execution
-            await asyncio.sleep(0.1)  # Simulate processing
-
-            # Update task with result
-            task.status = TaskStatus.COMPLETED
-            task.result = f"Task '{task.prompt}' completed with tools: {', '.join(task.tool_names)}"
-            task.updated_at = datetime.now().isoformat()
-
-        except Exception as e:
-            task.status = TaskStatus.FAILED
-            task.error = str(e)
-            task.updated_at = datetime.now().isoformat()
-
-        finally:
-            # Save task state
-            await self._save_task(task)
-            # Remove from running tasks
-            self._running_tasks.pop(task.id, None)
-
-    async def cancel_task(self, task_id: str) -> bool:
-        """
-        Cancel a running subagent task.
-
-        Args:
-            task_id: Task ID to cancel
-
-        Returns:
-            True if cancelled, False otherwise
-        """
-        async_task = self._running_tasks.get(task_id)
-        if async_task:
-            async_task.cancel()
-            task = await self.get_task(task_id)
-            if task:
-                task.status = TaskStatus.CANCELLED
-                task.updated_at = datetime.now().isoformat()
-                await self._save_task(task)
-            return True
-        else:
-            # Task not running, mark as cancelled anyway
-            task = await self.get_task(task_id)
-            if task and task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
-                task.status = TaskStatus.CANCELLED
-                task.updated_at = datetime.now().isoformat()
-                await self._save_task(task)
-                return True
-        return False
+        return task_id
 
     async def get_task(self, task_id: str) -> Optional[SubagentTask]:
-        """Get a task by ID."""
-        task_path = self._get_task_path(task_id)
-        if not task_path.exists():
-            return None
-
-        try:
-            data = read_json_file(task_path)
-            return SubagentTask.from_dict(data)
-        except (FileNotFoundError, OSError):
-            return None
-
-    async def list_tasks(self, status: Optional[str] = None) -> List[SubagentTask]:
-        """List all tasks, optionally filtered by status."""
-        tasks = []
-        for task_file in self.data_dir.glob("*.json"):
-            try:
-                data = read_json_file(task_file)
-                task = SubagentTask.from_dict(data)
-
-                # Filter by status if specified (convert string to enum for comparison)
-                if status is None:
-                    tasks.append(task)
-                else:
-                    # Compare with TaskStatus enum or string value
-                    task_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
-                    if task_status == status:
-                        tasks.append(task)
-            except (FileNotFoundError, OSError):
-                continue
-
-        # Sort by created_at (newest first)
-        tasks.sort(key=lambda t: t.created_at, reverse=True)
-        return tasks
-
-    async def _save_task(self, task: SubagentTask) -> None:
-        """Save task to disk."""
-        task_path = self._get_task_path(task.id)
-        write_json_file(task_path, task.to_dict())
-
-    async def delete_task(self, task_id: str) -> bool:
-        """Delete a task."""
-        task_path = self._get_task_path(task_id)
-        if task_path.exists():
-            task_path.unlink()
-            return True
-        return False
-
-    async def cleanup_old_tasks(self, days: int = 7) -> int:
         """
-        Clean up tasks older than specified days.
+        获取任务状态
 
         Args:
-            days: Number of days before tasks are considered old
+            task_id: 任务ID
 
         Returns:
-            Number of tasks cleaned up
+            SubagentTask对象，不存在返回None
         """
-        from datetime import datetime as dt
+        async with self._task_lock:
+            return self._tasks.get(task_id)
 
-        cutoff = dt.now().timestamp() - (days * 24 * 60 * 60)
-        deleted = 0
+    async def get_all_tasks(self) -> list[SubagentTask]:
+        """
+        获取所有任务
 
-        for task_file in self.data_dir.glob("*.json"):
-            try:
-                data = read_json_file(task_file)
-                created_at = datetime.fromisoformat(data.get("created_at", "")).timestamp()
+        Returns:
+            任务列表
+        """
+        async with self._task_lock:
+            return list(self._tasks.values())
 
-                if created_at < cutoff:
-                    task_file.unlink()
-                    deleted += 1
-            except (FileNotFoundError, OSError, ValueError, KeyError):
-                continue
+    async def cancel(self, task_id: str) -> bool:
+        """
+        取消任务
 
-        return deleted
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            是否取消成功
+        """
+        async with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return False
+
+            if task.status == TaskStatus.PENDING:
+                task.status = TaskStatus.CANCELLED
+                task.completed_at = datetime.now()
+                return True
+
+            if task_id in self._running_tasks:
+                self._running_tasks[task_id].cancel()
+                task.status = TaskStatus.CANCELLED
+                task.completed_at = datetime.now()
+                return True
+
+            return False
+
+    async def cleanup_completed(self) -> int:
+        """
+        清理已完成的任务
+
+        Returns:
+            清理的任务数量
+        """
+        async with self._task_lock:
+            completed_ids = [
+                tid for tid, task in self._tasks.items()
+                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED,
+                                  TaskStatus.CANCELLED, TaskStatus.TIMEOUT)
+            ]
+            for tid in completed_ids:
+                self._tasks.pop(tid, None)
+                self._running_tasks.pop(tid, None)
+
+            return len(completed_ids)
+
+    async def shutdown(self) -> None:
+        """关闭管理器，取消所有运行中的任务"""
+        self._shutdown_event.set()
+
+        # 取消所有运行中的任务
+        for task_id, bg_task in self._running_tasks.items():
+            bg_task.cancel()
+            await self._update_status(task_id, TaskStatus.CANCELLED)
+
+        self._running_tasks.clear()
+        self._tasks.clear()
+
+    async def _run_task(self, task_id: str) -> None:
+        """
+        执行子Agent任务（后台运行）
+
+        Args:
+            task_id: 任务ID
+        """
+        async with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return
+
+            task.status = TaskStatus.RUNNING
+            task.started_at = datetime.now()
+
+        try:
+            # 模拟任务执行 - 实际场景会调用AgentLoop
+            await asyncio.sleep(0.1)  # 模拟执行时间
+
+            # 检查超时
+            if task.started_at:
+                elapsed = (datetime.now() - task.started_at).total_seconds()
+                if elapsed > self._timeout:
+                    await self._update_status(task_id, TaskStatus.TIMEOUT)
+                    return
+
+            # 检查是否被取消
+            if self._shutdown_event.is_set():
+                await self._update_status(task_id, TaskStatus.CANCELLED)
+                return
+
+            # 模拟任务成功
+            result = f"任务完成: {self._tasks.get(task_id).prompt if task_id in self._tasks else ''}"
+            await self._update_status(task_id, TaskStatus.COMPLETED, result)
+
+        except asyncio.CancelledError:
+            await self._update_status(task_id, TaskStatus.CANCELLED)
+        except Exception as e:
+            await self._update_status(task_id, TaskStatus.FAILED, error=str(e))
+
+    async def _update_status(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        result: Optional[str] = None,
+        error: Optional[str] = None
+    ) -> None:
+        """
+        更新任务状态（内部方法）
+
+        Args:
+            task_id: 任务ID
+            status: 新状态
+            result: 执行结果（可选）
+            error: 错误信息（可选）
+        """
+        async with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return
+
+            task.status = status
+            if result is not None:
+                task.result = result
+            if error is not None:
+                task.error = error
+
+            if status in (TaskStatus.COMPLETED, TaskStatus.FAILED,
+                         TaskStatus.CANCELLED, TaskStatus.TIMEOUT):
+                task.completed_at = datetime.now()
+                self._running_tasks.pop(task_id, None)
+
+    @property
+    def task_count(self) -> int:
+        """获取当前任务数量"""
+        return len(self._tasks)
+
+    @property
+    def running_count(self) -> int:
+        """获取运行中任务数量"""
+        return len(self._running_tasks)

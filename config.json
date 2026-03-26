@@ -4,6 +4,164 @@
     "version": "1.0.0",
     "description": "AI-powered GIS data analysis agent"
   },
+  "timeout": {
+    "llm_timeout": 300,
+    "exec_timeout": 600,
+    "run_python_timeout": 600,
+    "sse_timeout": 600,
+    "sse_heartbeat": 30,
+    "max_iterations": 200,
+    "provider_max_retries": 5,
+    "provider_retry_delay": 2
+  },
+  "models": {
+    "default_provider": "dashscope",
+    "dashscope": {
+      "enabled": true,
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+      "models": {
+        "qwen3_5_plus": {
+          "id": "qwen3.5-plus",
+          "description": "Qwen 3.5 Plus，文本生成、深度思考、视觉理解"
+        },
+        "qwen3_max": {
+          "id": "qwen3-max-2026-01-23",
+          "description": "Qwen 3 Max，文本生成、深度思考"
+        },
+        "qwen3_coder_next": {
+          "id": "qwen3-coder-next",
+          "description": "Qwen 3 Coder Next，文本生成"
+        },
+        "qwen3_coder_plus": {
+          "id": "qwen3-coder-plus",
+          "description": "Qwen 3 Coder Plus，文本生成"
+        },
+        "glm_5": {
+          "id": "glm-5",
+          "description": "智谱 GLM-5，文本生成、深度思考"
+        },
+        "glm_4_7": {
+          "id": "glm-4.7",
+          "description": "智谱 GLM-4.7，文本生成、深度思考"
+        },
+        "kimi_k2_5": {
+          "id": "kimi-k2.5",
+          "description": "Kimi K2.5，文本生成、深度思考、视觉理解"
+        },
+        "minimax_m2_5": {
+          "id": "MiniMax-M2.5",
+          "description": "MiniMax M2.5，文本生成、深度思考"
+        }
+      }
+    },
+    "anthropic": {
+      "enabled": true,
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "base_url": "https://api.anthropic.com",
+      "models": {
+        "sonnet": {
+          "id": "claude-3-5-sonnet-20241022",
+          "description": "Anthropic Sonnet 模型，平衡性能",
+          "context_length": 200000,
+          "max_output_tokens": 8192
+        },
+        "sonnet_4_6": {
+          "id": "claude-sonnet-4-6-20250514",
+          "description": "Claude Sonnet 4.6，最新 Sonnet 模型",
+          "context_length": 200000,
+          "max_output_tokens": 8192
+        },
+        "opus": {
+          "id": "claude-3-opus-20240229",
+          "description": "Anthropic Opus 模型，最强推理",
+          "context_length": 200000,
+          "max_output_tokens": 4096
+        },
+        "opus_4_6": {
+          "id": "claude-opus-4-6-20250514",
+          "description": "Claude Opus 4.6，最新 Opus 模型",
+          "context_length": 200000,
+          "max_output_tokens": 8192
+        },
+        "haiku": {
+          "id": "claude-3-haiku-20240307",
+          "description": "Anthropic Haiku 模型，快速响应",
+          "context_length": 200000,
+          "max_output_tokens": 4096
+        },
+        "haiku_4_5": {
+          "id": "claude-haiku-4-5-20251001",
+          "description": "Claude Haiku 4.5，最新 Haiku 模型",
+          "context_length": 200000,
+          "max_output_tokens": 8192
+        }
+      }
+    },
+    "openai": {
+      "enabled": true,
+      "api_key_env": "OPENAI_API_KEY",
+      "base_url": "https://api.openai.com/v1",
+      "models": {
+        "gpt_4o": {
+          "id": "gpt-4o",
+          "description": "OpenAI GPT-4o，多模态模型",
+          "context_length": 128000,
+          "max_output_tokens": 4096
+        },
+        "gpt_4o_mini": {
+          "id": "gpt-4o-mini",
+          "description": "OpenAI GPT-4o Mini，快速经济",
+          "context_length": 128000,
+          "max_output_tokens": 16384
+        },
+        "gpt_4_turbo": {
+          "id": "gpt-4-turbo",
+          "description": "OpenAI GPT-4 Turbo",
+          "context_length": 128000,
+          "max_output_tokens": 4096
+        }
+      }
+    },
+    "deepseek": {
+      "enabled": false,
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "base_url": "https://api.deepseek.com",
+      "models": {
+        "v3": {
+          "id": "deepseek-chat",
+          "description": "DeepSeek V3，最新模型",
+          "context_length": 64000,
+          "max_output_tokens": 8192
+        },
+        "coder": {
+          "id": "deepseek-coder",
+          "description": "DeepSeek Coder，代码专用模型",
+          "context_length": 128000,
+          "max_output_tokens": 4096
+        }
+      }
+    },
+    "zhipu": {
+      "enabled": false,
+      "api_key_env": "ZHIPU_API_KEY",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "models": {
+        "glm_4": {
+          "id": "glm-4",
+          "description": "智谱 GLM-4",
+          "context_length": 128000,
+          "max_output_tokens": 8192
+        },
+        "glm_4_plus": {
+          "id": "glm-4-plus",
+          "description": "智谱 GLM-4 Plus",
+          "context_length": 128000,
+          "max_output_tokens": 8192
+        }
+      }
+    }
+  },
   "channels": {
     "cli": {
       "enabled": true,
@@ -16,36 +174,268 @@
   },
   "agents": {
     "defaults": {
-      "model": "claude-3-5-sonnet-20241022",
-      "max_iterations": 15,
+      "model": "qwen3.5-plus",
+      "max_iterations": 200,
       "memory_window": 50,
       "temperature": 0.7
     },
     "gis_adapter": {
       "enabled": true,
-      "tools": ["read_data", "write_data", "convert_data", "buffer", "proximity"]
+      "tools": ["read_data", "write_data", "convert_data", "read_raster", "write_raster", "convert_raster", "buffer", "proximity"]
     }
   },
   "tools": {
-    "data": {
+    "vector": {
       "read": {
         "enabled": true,
-        "formats": ["geojson", "shp", "gpkg", "kml"]
+        "formats": [
+          "geojson",
+          "shp",
+          "gpkg",
+          "kml",
+          "kmz",
+          "gml",
+          "gpx",
+          "topojson",
+          "wkt",
+          "wkb",
+          "csv",
+          "dbf",
+          "dxf",
+          "dgn",
+          "tab",
+          "mif",
+          "vrt",
+          "osm",
+          "pbf",
+          "fgdb",
+          "gdb",
+          "mdb",
+          "sqlite",
+          "ods",
+          "xls",
+          "xlsx",
+          "geo",
+          "gmt",
+          "bna",
+          "gxt",
+          "nitf",
+          "rte",
+          "trk",
+          "wpt",
+          "xml",
+          "zip",
+          "geojsonl",
+          "geojson.gz",
+          "geojson.bz2"
+        ]
       },
       "write": {
         "enabled": true,
-        "formats": ["geojson", "gpkg"]
+        "formats": [
+          "geojson",
+          "shp",
+          "gpkg",
+          "kml",
+          "kmz",
+          "gml",
+          "gpx",
+          "topojson",
+          "wkt",
+          "wkb",
+          "csv",
+          "dxf",
+          "dgn",
+          "tab",
+          "mif",
+          "vrt",
+          "sqlite",
+          "ods",
+          "xls",
+          "xlsx",
+          "geojsonl"
+        ]
       },
       "convert": {
-        "enabled": true
+        "enabled": true,
+        "supported_conversions": [
+          "geojson_to_shp",
+          "shp_to_geojson",
+          "shp_to_gpkg",
+          "gpkg_to_shp",
+          "kml_to_geojson",
+          "geojson_to_kml",
+          "gpx_to_geojson",
+          "geojson_to_gpx",
+          "dxf_to_geojson",
+          "geojson_to_dxf",
+          "dgn_to_shp",
+          "shp_to_dxf",
+          "mdb_to_gpkg",
+          "gdb_to_gpkg",
+          "csv_to_geojson",
+          "geojson_to_csv"
+        ]
+      }
+    },
+    "raster": {
+      "read": {
+        "enabled": true,
+        "formats": [
+          "tif",
+          "tiff",
+          "geotiff",
+          "img",
+          "bil",
+          "bip",
+          "bsq",
+          "asc",
+          "grd",
+          "nc",
+          "cdf",
+          "h5",
+          "hdf",
+          "hdf4",
+          "hdf5",
+          "png",
+          "jpg",
+          "jpeg",
+          "bmp",
+          "gif",
+          "webp",
+          "ecw",
+          "jp2",
+          "j2k",
+          "mrf",
+          "vrt",
+          "adf",
+          "dem",
+          "dt0",
+          "dt1",
+          "dt2",
+          "nitf",
+          "ntf",
+          "nsf",
+          "hdr",
+          "pix",
+          "rgb",
+          "rgba",
+          "sgi",
+          "int",
+          "ers",
+          "rrd",
+          "gri",
+          "rst",
+          "idb",
+          "zmap",
+          "xpm",
+          "pdf",
+          "rpf",
+          "kea",
+          "fits",
+          "cog",
+          "zarr",
+          "tms",
+          "mbtiles",
+          "xyz"
+        ]
+      },
+      "write": {
+        "enabled": true,
+        "formats": [
+          "tif",
+          "tiff",
+          "geotiff",
+          "img",
+          "bil",
+          "bip",
+          "bsq",
+          "asc",
+          "grd",
+          "nc",
+          "h5",
+          "hdf5",
+          "png",
+          "jpg",
+          "jpeg",
+          "bmp",
+          "gif",
+          "webp",
+          "jp2",
+          "j2k",
+          "vrt",
+          "ers",
+          "idb",
+          "kea",
+          "fits",
+          "xyz",
+          "mbtiles"
+        ]
+      },
+      "convert": {
+        "enabled": true,
+        "supported_conversions": [
+          "tiff_to_png",
+          "tiff_to_jpeg",
+          "png_to_tiff",
+          "jpeg_to_tiff",
+          "img_to_geotiff",
+          "ecw_to_geotiff",
+          "jp2_to_geotiff",
+          "tiff_to_compressed_geotiff",
+          "netcdf_to_geotiff",
+          "hdf5_to_geotiff",
+          "tiff_to_mbtils"
+        ]
       }
     },
     "gis": {
       "buffer": {
-        "enabled": true
+        "enabled": true,
+        "default_distance_unit": "meter",
+        "supported_units": ["meter", "kilometer", "degree"]
       },
       "proximity": {
         "enabled": true
+      },
+      "analysis": {
+        "enabled": true,
+        "operations": [
+          "clip",
+          "intersect",
+          "union",
+          "difference",
+          "dissolve",
+          "merge",
+          "spatial_join",
+          "buffer",
+          "centroid",
+          "convex_hull"
+        ]
+      }
+    },
+    "system": {
+      "list_files": {
+        "enabled": true
+      },
+      "read_file": {
+        "enabled": true,
+        "max_file_size_mb": 100
+      },
+      "write_file": {
+        "enabled": true
+      },
+      "edit_file": {
+        "enabled": true
+      },
+      "exec": {
+        "enabled": true,
+        "timeout_seconds": 600,
+        "working_dir": "./workspace"
+      },
+      "run_python": {
+        "enabled": true,
+        "timeout_seconds": 600
       }
     }
   },
@@ -53,5 +443,9 @@
     "path": "./workspace",
     "data_path": "./data",
     "temp_path": "./temp"
+  },
+  "defaults": {
+    "crs": "EPSG:4528",
+    "crs_description": "CGCS2000 3-degree Gauss-Kruger zone 40"
   }
 }

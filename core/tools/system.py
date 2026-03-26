@@ -17,21 +17,55 @@ def get_python_path() -> str:
 
     # Try to get from environment variable first (loaded from .env)
     python_path = os.environ.get("ARCGIS_PRO_PYTHON", None)
-    if python_path and Path(python_path).exists():
-        return python_path
+
+    # Debug logging
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if python_path:
+        logger.info(f"ARCGIS_PRO_PYTHON from env: {python_path!r}")
+
+        # Try to normalize path and check existence
+        try:
+            # Handle both forward and backward slashes
+            python_path = python_path.replace('/', '\\')
+            # Remove potential quotes around path
+            python_path = python_path.strip('"').strip("'")
+
+            check_path = Path(python_path)
+            logger.info(f"Checking path: {check_path} (exists: {check_path.exists()})")
+
+            if check_path.exists():
+                logger.info(f"Using configured Python: {check_path}")
+                return str(check_path)
+            else:
+                logger.warning(f"Configured Python path does not exist: {check_path}")
+        except Exception as e:
+            logger.warning(f"Error checking Python path: {e}")
+
     # Try to get from config module
     try:
         from config import settings
         if hasattr(settings, 'ARCGIS_PRO_PYTHON') and settings.ARCGIS_PRO_PYTHON:
             check_path = Path(settings.ARCGIS_PRO_PYTHON)
+            logger.info(f"ARCGIS_PRO_PYTHON from settings: {check_path} (exists: {check_path.exists()})")
             if check_path.exists():
+                logger.info(f"Using settings Python: {check_path}")
                 return str(check_path)
+            else:
+                logger.warning(f"Settings Python path does not exist: {check_path}")
     except ImportError:
-        pass
+        logger.warning("Failed to import config settings")
+    except Exception as e:
+        logger.warning(f"Error loading settings: {e}")
+
     # Fall back to current Python executable
     if sys.executable and Path(sys.executable).exists():
+        logger.info(f"Using sys.executable: {sys.executable}")
         return sys.executable
+
     # Last resort: use "python"
+    logger.warning("No valid Python path found, falling back to 'python'")
     return "python"
 
 
@@ -364,6 +398,14 @@ class ExecuteCommandTool(Tool):
         }
 
     async def execute(self, command: str, working_dir: str | None = None, **kwargs) -> str:
+        """Execute shell command with improved error handling."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # DEBUG: Log entry with full details
+        logger.info(f"EXEC_TOOL_ENTRY: command={command!r}, working_dir={working_dir!r}, workspace={self.workspace!r}")
+        logger.info(f"EXEC_TOOL_ATTRS: timeout={self.timeout}, python_path={self.python_path!r}")
+
         try:
             # Determine working directory
             if working_dir:
@@ -374,6 +416,9 @@ class ExecuteCommandTool(Tool):
             else:
                 cwd = str(self.working_dir or self.workspace)
 
+            logger.info(f"exec command: {command}")
+            logger.info(f"exec cwd: {cwd}")
+
             guard_error = self._guard_command(command, cwd)
             if guard_error:
                 return guard_error
@@ -382,16 +427,57 @@ class ExecuteCommandTool(Tool):
             import sys
             if sys.platform == 'win32':
                 # Replace 'python' in command with configured path
+                # Only replace if it's a standalone command word, not in a path
                 import re
-                command = re.sub(r'\bpython\b', f'"{self.python_path}"', command)
+                # Match 'python' at word boundaries, but not preceded by \ or / or : (to avoid paths)
+                # and not followed by \ or / (to avoid paths)
+                # Also avoid replacing inside quotes
+                python_pattern = r"""(?<![:\\/\w])(?P<cmd>python)(?![\\/])"""
+
+                def replace_python(match):
+                    return f'"{self.python_path}"'
+
+                command = re.sub(python_pattern, replace_python, command, flags=re.IGNORECASE)
+                logger.info(f"exec modified command (Windows): {command}")
 
             # Run command
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd
-            )
+            try:
+                logger.info(f"Attempting create_subprocess_shell...")
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd
+                )
+                logger.info(f"Process created successfully: {process}")
+            except NotImplementedError as e:
+                logger.error(f"NotImplementedError during create_subprocess_shell: {e}")
+                # Try alternative approach using subprocess module
+                logger.warning("Trying alternative subprocess.run approach")
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.timeout
+                    )
+                    output_parts = []
+                    if result.stdout:
+                        output_parts.append(result.stdout)
+                    if result.stderr:
+                        output_parts.append(f"STDERR:\n{result.stderr}")
+                    if result.returncode != 0:
+                        output_parts.append(f"\nExit code: {result.returncode}")
+                    return "\n".join(output_parts) if output_parts else "(no output)"
+                except Exception as alt_e:
+                    logger.error(f"Alternative subprocess also failed: {alt_e}")
+                    return f"Error: Command execution not supported (NotImplementedError): {e}\nAlternative failed: {alt_e}"
+            except Exception as e:
+                logger.error(f"Exception during create_subprocess_shell: {type(e).__name__}: {e}")
+                raise
 
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -400,12 +486,38 @@ class ExecuteCommandTool(Tool):
                 )
             except asyncio.TimeoutError:
                 process.kill()
+                await process.wait()
                 return f"Error: Command timed out after {self.timeout} seconds"
+            except NotImplementedError as e:
+                # On Windows with ProactorEventLoop, certain operations may not be supported
+                # Try alternative approach using subprocess module
+                logger.warning(f"NotImplementedError in subprocess, trying alternative: {e}")
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=self.timeout
+                    )
+                    output_parts = []
+                    if result.stdout:
+                        output_parts.append(result.stdout)
+                    if result.stderr:
+                        output_parts.append(f"STDERR:\n{result.stderr}")
+                    if result.returncode != 0:
+                        output_parts.append(f"\nExit code: {result.returncode}")
+                    return "\n".join(output_parts) if output_parts else "(no output)"
+                except Exception as alt_e:
+                    logger.error(f"Alternative subprocess also failed: {alt_e}")
+                    return f"Error: Command execution not supported (NotImplementedError): {e}\nAlternative failed: {alt_e}"
 
             output_parts = []
 
             # Decode with proper encoding
-            def decode_output(data: bytes) -> str:
+            def decode_output(data: bytes, label: str = "") -> str:
                 if not data:
                     return ""
                 # On Windows, try GBK (CP936) first for system commands, then UTF-8
@@ -423,10 +535,10 @@ class ExecuteCommandTool(Tool):
                     return data.decode(locale.getpreferredencoding(), errors="replace")
 
             if stdout:
-                output_parts.append(decode_output(stdout))
+                output_parts.append(decode_output(stdout, "stdout"))
 
             if stderr:
-                stderr_text = decode_output(stderr)
+                stderr_text = decode_output(stderr, "stderr")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
 
@@ -440,12 +552,21 @@ class ExecuteCommandTool(Tool):
             if len(result) > max_len:
                 result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
 
+            logger.info(f"exec result length: {len(result)}")
             return result
 
-        except PermissionError:
-            return "Error: Permission denied executing command"
+        except PermissionError as e:
+            logger.error(f"PermissionError executing command: {e}")
+            return f"Error: Permission denied executing command: {str(e)}"
+        except asyncio.CancelledError:
+            logger.warning("Command execution was cancelled")
+            return "Error: Command execution was cancelled"
         except Exception as e:
-            return f"Error executing command: {str(e)}"
+            import traceback
+            logger.error(f"Unexpected error executing command: {e}")
+            logger.debug(traceback.format_exc())
+            # Provide detailed error information
+            return f"Error executing command: {type(e).__name__}: {str(e)}\nDebug info: command={command!r}, cwd={cwd!r}"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands.
@@ -522,6 +643,9 @@ class RunPythonScriptTool(Tool):
         }
 
     async def execute(self, path: str, args: list[str] | None = None, **kwargs) -> str:
+        """Execute Python script using subprocess (sync) for Windows compatibility."""
+        import subprocess
+        
         try:
             script = Path(path)
             if not script.is_absolute():
@@ -546,25 +670,16 @@ class RunPythonScriptTool(Tool):
             if args:
                 cmd.extend(args)
 
-            # Run script
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(script.parent)
+            # Run script using subprocess (sync) for better Windows compatibility
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(script.parent),
+                timeout=self.timeout,
+                encoding='utf-8',
+                errors='replace'
             )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=self.timeout
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                return f"Error: Script execution timed out after {self.timeout} seconds"
-
-            stdout_text = stdout.decode("utf-8", errors="replace")
-            stderr_text = stderr.decode("utf-8", errors="replace")
 
             # Show relative path if inside workspace
             display_path = path
@@ -574,27 +689,29 @@ class RunPythonScriptTool(Tool):
             except ValueError:
                 pass
 
-            result = [
+            output = [
                 f"Script: {display_path}",
                 f"Python: {python_path}",
-                f"Exit code: {process.returncode}"
+                f"Exit code: {result.returncode}"
             ]
 
-            if stdout_text:
-                result.append(f"\n=== STDOUT ===\n{stdout_text}")
+            if result.stdout:
+                output.append(f"\n=== STDOUT ===\n{result.stdout}")
 
-            if stderr_text:
-                result.append(f"\n=== STDERR ===\n{stderr_text}")
+            if result.stderr:
+                output.append(f"\n=== STDERR ===\n{result.stderr}")
 
-            if process.returncode == 0:
-                result.append("\n✓ Script executed successfully")
+            if result.returncode == 0:
+                output.append("\n✓ Script executed successfully")
             else:
-                result.append(f"\n✗ Script failed with exit code {process.returncode}")
+                output.append(f"\n✗ Script failed with exit code {result.returncode}")
 
-            return "\n".join(result)
+            return "\n".join(output)
 
         except PermissionError:
             return f"Error: Permission denied executing {path}"
+        except subprocess.TimeoutExpired:
+            return f"Error: Script execution timed out after {self.timeout} seconds"
         except Exception as e:
             return f"Error running Python script: {str(e)}"
 

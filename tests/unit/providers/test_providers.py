@@ -4,6 +4,8 @@ import pytest
 from core.providers.base import LLMProvider
 from core.providers.anthropic import AnthropicProvider
 from core.providers.openai import OpenAIProvider
+from core.providers.dashscope import DashscopeProvider
+from core.providers.factory import ProviderFactory, create_provider
 
 
 class MockLLMProvider(LLMProvider):
@@ -117,3 +119,69 @@ def test_openai_provider_requires_api_key():
     """Test OpenAI provider validates API key"""
     with pytest.raises(ValueError, match="requires an API key"):
         OpenAIProvider(api_key="")
+
+
+def test_dashscope_provider_properties():
+    """Test Dashscope provider has required properties"""
+    provider = DashscopeProvider(api_key="test-key")
+    assert provider.name == "dashscope"
+    assert provider.supports_streaming is True
+
+
+def test_dashscope_provider_default_model():
+    """Test Dashscope provider uses default model"""
+    provider = DashscopeProvider(api_key="test-key")
+    assert provider.model == "qwen-coding-plus"
+
+
+def test_dashscope_provider_requires_api_key():
+    """Test Dashscope provider validates API key"""
+    with pytest.raises(ValueError, match="requires an API key"):
+        DashscopeProvider(api_key="")
+
+
+# Provider Factory Tests
+def test_factory_create_anthropic_provider():
+    """Test factory creates Anthropic provider"""
+    provider = ProviderFactory.get_provider("anthropic", api_key="test-key")
+    assert isinstance(provider, AnthropicProvider)
+
+
+def test_factory_create_openai_provider():
+    """Test factory creates OpenAI provider"""
+    provider = ProviderFactory.get_provider("openai", api_key="test-key")
+    assert isinstance(provider, OpenAIProvider)
+
+
+def test_factory_create_dashscope_provider():
+    """Test factory creates Dashscope provider"""
+    provider = ProviderFactory.get_provider("dashscope", api_key="test-key")
+    assert isinstance(provider, DashscopeProvider)
+
+
+def test_factory_unsupported_provider():
+    """Test factory raises error for unsupported provider"""
+    with pytest.raises(ValueError, match="Unsupported provider"):
+        ProviderFactory.get_provider("unsupported_provider", api_key="test-key")
+
+
+def test_factory_list_providers():
+    """Test factory lists all available providers"""
+    providers = ProviderFactory.list_providers()
+    assert "anthropic" in providers
+    assert "openai" in providers
+    assert "dashscope" in providers
+
+
+def test_create_provider_function():
+    """Test convenience function for creating provider"""
+    provider = create_provider("anthropic", api_key="test-key")
+    assert isinstance(provider, AnthropicProvider)
+
+
+def test_factory_get_default_model():
+    """Test factory gets default model for provider"""
+    anthropic_model = ProviderFactory.get_default_model("anthropic")
+    dashscope_model = ProviderFactory.get_default_model("dashscope")
+    assert anthropic_model != ""
+    assert dashscope_model == "qwen-coding-plus"

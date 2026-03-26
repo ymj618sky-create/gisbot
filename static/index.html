@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GIS Agent</title>
+    <script src="https://cdn.bootcdn.net/ajax/libs/marked/11.1.1/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0d1117;
+            --bg-sec: #161b22;
+            --bg-ter: #21262d;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-sec: #8b949e;
+            --blue: #58a6ff;
+            --green: #238636;
+            --orange: #f97316;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            font-size: 13px;
+        }
+        .sidebar {
+            width: 160px;
+            background: var(--bg-sec);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-header {
+            padding: 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .sidebar-header svg { width: 12px; height: 12px; color: var(--blue); }
+        .sidebar-info {
+            padding: 10px;
+            font-size: 10px;
+            color: var(--text-sec);
+            line-height: 1.5;
+        }
+        .sidebar-info-item {
+            margin-bottom: 8px;
+        }
+        .sidebar-info-label {
+            color: var(--text);
+            font-weight: 500;
+        }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .toolbar {
+            padding: 6px 10px;
+            background: var(--bg-sec);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .toolbar-left { display: flex; align-items: center; gap: 6px; }
+        .new-chat {
+            padding: 4px 10px;
+            background: var(--blue);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .new-chat:hover { background: #4f93e6; }
+        .execution {
+            padding: 0 10px 6px;
+            background: var(--bg-ter);
+            border-bottom: 1px solid var(--border);
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .execution-step {
+            padding: 4px 0;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0.7;
+        }
+        .execution-step.success { color: var(--green); }
+        .execution-step.error { color: var(--orange); }
+        .execution-step .icon { width: 12px; height: 12px; }
+        .execution-step .tool { font-family: 'SF Mono', monospace; color: var(--blue); }
+        .execution-step .time { margin-left: auto; color: var(--text-sec); font-size: 10px; }
+        .chat {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .chat::-webkit-scrollbar { width: 4px; }
+        .chat::-webkit-scrollbar-track { background: transparent; }
+        .chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+        .msg {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+        .msg.user { flex-direction: row-reverse; }
+        .avatar {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+        .msg.user .avatar { background: var(--bg-ter); }
+        .msg.assistant .avatar { background: var(--blue); color: white; }
+        .bubble {
+            padding: 6px 10px;
+            border-radius: 6px;
+            line-height: 1.5;
+            max-width: calc(100% - 28px);
+        }
+        .msg.user .bubble {
+            background: var(--blue);
+            color: white;
+        }
+        .msg.assistant .bubble {
+            background: var(--bg-ter);
+            border: 1px solid var(--border);
+        }
+        .bubble p { margin: 0 0 4px; }
+        .bubble p:last-child { margin: 0; }
+        .bubble code {
+            font-family: 'SF Mono', monospace;
+            background: rgba(0,0,0,0.3);
+            padding: 1px 3px;
+            border-radius: 2px;
+            font-size: 10px;
+        }
+        .bubble pre {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 6px;
+            margin: 4px 0;
+            overflow-x: auto;
+        }
+        .bubble pre code { background: none; padding: 0; }
+        .bubble ul, .bubble ol { margin: 0 0 4px 12px; }
+        .bubble li { margin: 1px 0; }
+        .bubble table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 4px 0;
+            font-size: 11px;
+        }
+        .bubble th, .bubble td {
+            border: 1px solid var(--border);
+            padding: 3px 6px;
+            text-align: left;
+        }
+        .bubble th { background: var(--bg-sec); }
+        .typing {
+            display: none;
+            padding: 6px 10px;
+            color: var(--text-sec);
+            font-size: 11px;
+        }
+        .typing.active { display: flex; }
+        .typing span { margin-right: 3px; }
+        .typing .dot {
+            display: inline-block;
+            width: 5px;
+            height: 5px;
+            background: var(--blue);
+            border-radius: 50%;
+            animation: bounce 1.4s infinite;
+        }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        .input-area {
+            padding: 10px 12px;
+            background: var(--bg-sec);
+            border-top: 1px solid var(--border);
+        }
+        .input-box {
+            display: flex;
+            gap: 8px;
+            background: var(--bg-ter);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            align-items: flex-end;
+        }
+        .input-box:focus-within { border-color: var(--blue); }
+        .input {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            font-size: 13px;
+            outline: none;
+            resize: none;
+            min-height: 32px;
+            max-height: 100px;
+            line-height: 1.5;
+        }
+        .send {
+            padding: 8px 16px;
+            background: var(--blue);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .send:hover { background: #4f93e6; }
+        .send:disabled { opacity: 0.5; cursor: not-allowed; }
+        .upload-btn {
+            padding: 8px 10px;
+            background: var(--bg-sec);
+            color: var(--text-sec);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .upload-btn:hover {
+            background: var(--bg-ter);
+            color: var(--text);
+        }
+        .upload-input {
+            display: none;
+        }
+        .uploaded-files {
+            padding: 8px 12px;
+            background: var(--bg-sec);
+            border-top: 1px solid var(--border);
+            display: none;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .uploaded-files.has-files {
+            display: flex;
+        }
+        .uploaded-file {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-ter);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+        .uploaded-file img {
+            width: 24px;
+            height: 24px;
+            object-fit: cover;
+            border-radius: 3px;
+        }
+        .uploaded-file-name {
+            max-width: 80px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .uploaded-file-remove {
+            color: var(--text-sec);
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .uploaded-file-remove:hover {
+            color: var(--orange);
+        }
+        .upload-progress {
+            padding: 4px 12px;
+            background: var(--bg-sec);
+            display: none;
+        }
+        .upload-progress.active { display: block; }
+        .progress-bar {
+            height: 2px;
+            background: var(--border);
+            border-radius: 1px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--blue);
+            transition: width 0.3s;
+        }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10"/></svg>
+            <span>GIS Agent</span>
+        </div>
+        <div class="sidebar-info">
+            <div class="sidebar-info-item"><span class="sidebar-info-label">会话ID:</span> <span id="chatIdDisplay">-</span></div>
+            <div class="sidebar-info-item"><span class="sidebar-info-label">消息数:</span> <span id="msgCount">0</span></div>
+            <div class="sidebar-info-item"><span class="sidebar-info-label">状态:</span> <span id="statusSidebar">就绪</span></div>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <button class="new-chat" id="newChat">+ 新对话</button>
+                <span id="status" style="color: var(--text-sec); font-size: 11px;">就绪</span>
+            </div>
+            <select id="model" style="background:var(--bg-ter); border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:4px; font-size:12px;">
+                <option>Qwen 3.5 Plus</option>
+                <option>Qwen 3 Max</option>
+                <option>GLM 4.7</option>
+                <option>Claude 3.5 Sonnet</option>
+            </select>
+        </div>
+        <div class="execution" id="execution"></div>
+        <div class="chat" id="chat">
+            <div class="msg assistant">
+                <div class="avatar">AI</div>
+                <div class="bubble">您好！我是 GIS 智能助手，可以帮您进行地理数据分析、数据处理和可视化。</div>
+            </div>
+        </div>
+        <div class="typing" id="typing">
+            <span>AI 正在思考</span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+        </div>
+        <div class="uploaded-files" id="uploadedFiles"></div>
+        <div class="upload-progress" id="uploadProgress">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+        </div>
+        <div class="input-area">
+            <div class="input-box">
+                <input type="file" class="upload-input" id="uploadInput" multiple accept=".png,.jpg,.jpeg,.tif,.tiff,.pdf,.docx,.doc,.txt,.csv,.xlsx,.xls,.shp,.geojson,.gpkg">
+                <button class="upload-btn" id="uploadBtn" title="上传文件">+</button>
+                <textarea class="input" id="input" placeholder="输入您的问题..." rows="1"></textarea>
+                <button class="send" id="send">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Wait for DOM to be fully loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Configure marked with custom renderer for better performance
+            const renderer = new marked.Renderer();
+            renderer.code = function(code, language) {
+                const validLang = language && hljs.getLanguage(language) ? language : 'plaintext';
+                const highlighted = hljs.highlight(code, { language: validLang, ignoreIllegals: true }).value;
+                return `<pre><code class="hljs language-${validLang}">${highlighted}</code></pre>`;
+            };
+            marked.setOptions({
+                renderer: renderer,
+                breaks: true,
+                gfm: true
+            });
+
+            const STREAM_URL = '/api/stream/web';
+            let chatId = null;
+            let msgCount = 0;
+            let isLoading = false;
+            const chat = document.getElementById('chat');
+            const input = document.getElementById('input');
+            const sendBtn = document.getElementById('send');
+            const typing = document.getElementById('typing');
+            const executionEl = document.getElementById('execution');
+            const statusEl = document.getElementById('status');
+            const chatIdDisplay = document.getElementById('chatIdDisplay');
+            const msgCountDisplay = document.getElementById('msgCount');
+            const statusSidebar = document.getElementById('statusSidebar');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadInput = document.getElementById('uploadInput');
+            const uploadedFilesEl = document.getElementById('uploadedFiles');
+            const uploadProgress = document.getElementById('uploadProgress');
+            const progressFill = document.getElementById('progressFill');
+
+            // Store uploaded file paths
+            let uploadedFilePaths = [];
+
+            async function init() {
+                await newChat();
+            }
+
+        async function newChat() {
+            chatId = 'chat-' + Date.now();
+            msgCount = 0;
+            chat.innerHTML = '';
+            executionEl.innerHTML = '';
+            uploadedFilePaths = [];
+            uploadedFilesEl.innerHTML = '';
+            uploadedFilesEl.classList.remove('has-files');
+            // Add welcome message
+            chat.innerHTML = `
+                <div class="msg assistant">
+                    <div class="avatar">AI</div>
+                    <div class="bubble">您好！我是 GIS 智能助手，可以帮您进行地理数据分析、数据处理和可视化。</div>
+                </div>
+            `;
+            updateSidebar();
+        }
+
+        function updateSidebar() {
+            chatIdDisplay.textContent = chatId.slice(-8);
+            msgCountDisplay.textContent = msgCount;
+            statusSidebar.textContent = isLoading ? '处理中' : '就绪';
+            statusEl.textContent = isLoading ? '处理中' : '就绪';
+        }
+
+        function addMsg(content, role) {
+            const el = document.createElement('div');
+            el.className = `msg ${role}`;
+            el.innerHTML = `
+                <div class="avatar">${role === 'user' ? '我' : 'AI'}</div>
+                <div class="bubble">${role === 'assistant' ? marked.parse(content) : content}</div>
+            `;
+            chat.appendChild(el);
+            msgCount++;
+            updateSidebar();
+            chat.scrollTop = chat.scrollHeight;
+            return el;
+        }
+
+        function addExecution(tool, status, time) {
+            const el = document.createElement('div');
+            el.className = `execution-step ${status}`;
+            const icon = status === 'success' ? '✓' : status === 'error' ? '✗' : '◷';
+            el.innerHTML = `<span class="icon">${icon}</span><span class="tool">${tool}</span><span class="time">${time}</span>`;
+            executionEl.appendChild(el);
+            executionEl.scrollTop = executionEl.scrollHeight;
+        }
+
+        function scrollToBottom() {
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const msg = input.value.trim();
+            if (!msg || isLoading) return;
+
+            // Add uploaded files info to message if any
+            let fullMsg = msg;
+            if (uploadedFilePaths.length > 0) {
+                fullMsg += `\n\n已上传文件: ${uploadedFilePaths.join(', ')}`;
+            }
+
+            addMsg(msg, 'user');
+            input.value = '';
+            input.style.height = 'auto';
+            isLoading = true;
+            sendBtn.disabled = true;
+            sendBtn.textContent = '发送中...';
+            typing.classList.add('active');
+            updateSidebar();
+
+            let retries = 0;
+            const maxRetries = 3;
+
+            async function trySend() {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10分钟超时
+
+                    let url = `${STREAM_URL}/${chatId}?message=${encodeURIComponent(msg)}`;
+
+                    // Add media parameter if files are uploaded
+                    if (uploadedFilePaths.length > 0) {
+                        console.log('Uploaded files:', uploadedFilePaths);
+                        url += `&media=${encodeURIComponent(uploadedFilePaths.join(','))}`;
+                        console.log('Request URL:', url);
+                    }
+
+                    const r = await fetch(url, {
+                        signal: controller.signal,
+                        headers: {
+                            'Cache-Control': 'no-cache',
+                        }
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (!r.ok) {
+                        throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+                    }
+
+                    const reader = r.body.getReader();
+                    const decoder = new TextDecoder();
+                    let aiMsg = null;
+                    let full = '';
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n\n');
+                        buffer = lines.pop() || ''; // 保留不完整的最后一行
+
+                        for (const line of lines) {
+                            if (!line.startsWith('data: ')) continue;
+                            try {
+                                const d = JSON.parse(line.slice(6));
+                                if (d.type === 'connected' || d.type === 'heartbeat') {
+                                    // 连接保持信号，忽略
+                                } else if (d.type === 'progress') {
+                                    addExecution(d.message, 'progress', new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+                                } else if (d.type === 'response') {
+                                    typing.classList.remove('active');
+                                    if (!aiMsg) {
+                                        aiMsg = addMsg(d.content, 'assistant');
+                                    } else {
+                                        full += d.content;
+                                        aiMsg.querySelector('.bubble').innerHTML = marked.parse(full);
+                                        scrollToBottom();
+                                    }
+                                } else if (d.type === 'error') {
+                                    typing.classList.remove('active');
+                                    addMsg(`错误: ${d.message}`, 'assistant');
+                                } else if (d.type === 'done') {
+                                    // 处理完成
+                                }
+                            } catch (e) {
+                                console.warn('Failed to parse SSE data:', e);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Send error:', e);
+                    if (e.name === 'AbortError') {
+                        throw new Error('请求超时，请稍后重试');
+                    } else if (e.message.includes('network') || e.message.includes('fetch')) {
+                        throw new Error('网络连接失败，请检查网络连接');
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+
+            try {
+                await trySend();
+            } catch (e) {
+                console.error('Message send failed:', e);
+                typing.classList.remove('active');
+
+                if (retries < maxRetries) {
+                    retries++;
+                    addMsg(`连接失败，正在重试 (${retries}/${maxRetries})...`, 'assistant');
+                    await new Promise(r => setTimeout(r, 2000));
+                    try {
+                        await trySend();
+                    } catch (retryError) {
+                        addMsg(`错误: ${retryError.message}`, 'assistant');
+                    }
+                } else {
+                    addMsg(`错误: ${e.message}\n\n建议: 1. 检查网络连接 2. 刷新页面重试 3. 联系管理员`, 'assistant');
+                }
+            } finally {
+                isLoading = false;
+                sendBtn.disabled = false;
+                sendBtn.textContent = '发送';
+                updateSidebar();
+                // Clear uploaded files after sending
+                uploadedFilePaths = [];
+                uploadedFilesEl.innerHTML = '';
+            }
+        }
+
+        // File upload handling
+        uploadBtn.addEventListener('click', () => uploadInput.click());
+
+        uploadInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+            uploadInput.value = '';
+        });
+
+        async function handleFiles(files) {
+            if (!files.length) return;
+
+            uploadProgress.classList.add('active');
+            let uploaded = 0;
+
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                // Add chat_id to associate file with current session
+                if (chatId) {
+                    formData.append('chat_id', chatId);
+                }
+
+                try {
+                    const response = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Upload failed: ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    uploadedFilePaths.push(result.workspace_path);
+                    addUploadedFile(result);
+                    console.log('File uploaded:', result);
+                } catch (error) {
+                    console.error('Upload error:', error);
+                    addMsg(`文件上传失败: ${file.name}`, 'assistant');
+                }
+
+                uploaded++;
+                const progress = Math.round((uploaded / files.length) * 100);
+                progressFill.style.width = progress + '%';
+            }
+
+            setTimeout(() => {
+                uploadProgress.classList.remove('active');
+                progressFill.style.width = '0%';
+            }, 1000);
+        }
+
+        function addUploadedFile(fileInfo) {
+            const div = document.createElement('div');
+            div.className = 'uploaded-file';
+
+            // Determine the correct preview path
+            // Session files: /workspace/data/sessions/{chat_id}/uploads/{filename}
+            // General files: /uploads/{filename}
+            let previewPath;
+            if (fileInfo.chat_id) {
+                previewPath = `/workspace/data/sessions/${fileInfo.chat_id}/uploads/${fileInfo.saved_name}`;
+            } else {
+                previewPath = `/${fileInfo.relative_path}`;
+            }
+
+            if (fileInfo.file_type === 'image') {
+                div.innerHTML = `
+                    <img src="${previewPath}" alt="${fileInfo.filename}">
+                    <span class="uploaded-file-remove" data-path="${fileInfo.workspace_path}">×</span>
+                `;
+            } else {
+                div.innerHTML = `
+                    <span>${getFileIcon(fileInfo.file_type)}</span>
+                    <span class="uploaded-file-name" title="${fileInfo.filename}">${fileInfo.filename}</span>
+                    <span class="uploaded-file-remove" data-path="${fileInfo.workspace_path}">×</span>
+                `;
+            }
+
+            uploadedFilesEl.appendChild(div);
+            uploadedFilesEl.classList.add('has-files');
+
+            div.querySelector('.uploaded-file-remove').addEventListener('click', () => {
+                const pathToRemove = div.querySelector('.uploaded-file-remove').dataset.path;
+                const index = uploadedFilePaths.indexOf(pathToRemove);
+                if (index > -1) {
+                    uploadedFilePaths.splice(index, 1);
+                }
+                div.remove();
+                if (uploadedFilesEl.children.length === 0) {
+                    uploadedFilesEl.classList.remove('has-files');
+                }
+            });
+        }
+
+        function getFileIcon(fileType) {
+            const icons = {
+                'image': '📷',
+                'document': '📄',
+                'table': '📊',
+                'gis': '🗺️'
+            };
+            return icons[fileType] || '📁';
+        }
+
+        input.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 80) + 'px';
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+            document.getElementById('newChat').addEventListener('click', newChat);
+
+            init();
+        }); // End of DOMContentLoaded
+    </script>
+</body>
+</html>

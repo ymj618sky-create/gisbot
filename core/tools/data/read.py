@@ -8,6 +8,9 @@ from core.tools.base import Tool
 class ReadDataTool(Tool):
     """Tool for reading GIS data from various formats."""
 
+    def __init__(self, workspace: Path | None = None):
+        self.workspace = workspace or Path.cwd()
+
     @property
     def name(self) -> str:
         return "read_data"
@@ -16,7 +19,8 @@ class ReadDataTool(Tool):
     def description(self) -> str:
         return (
             "Read a GIS data file (GeoJSON, Shapefile, GeoPackage, etc.). "
-            "Returns layer info, feature count, CRS, and spatial bounds."
+            "Returns layer info, feature count, CRS, and spatial bounds. "
+            "File paths are relative to workspace unless absolute."
         )
 
     @property
@@ -43,7 +47,7 @@ class ReadDataTool(Tool):
 
             path = Path(file_path)
             if not path.is_absolute():
-                path = Path.cwd() / path
+                path = self.workspace / path
 
             if not path.exists():
                 return f"Error: File not found: {path}"

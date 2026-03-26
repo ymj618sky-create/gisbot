@@ -50,11 +50,17 @@ class ToolRegistry:
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
             result = await tool.execute(**params)
-            if isinstance(result, str) and result.startswith("Error"):
+            # Only treat as error if it explicitly starts with "Error:" (with colon)
+            # This avoids treating messages like "Errors found in..." as errors
+            if isinstance(result, str) and result.startswith("Error:"):
                 return result + _HINT
             return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+            # Get detailed error info
+            error_msg = str(e) if str(e) else type(e).__name__
+            import traceback
+            error_detail = traceback.format_exc()
+            return f"Error executing {name}: {error_msg}\n{error_detail}" + _HINT
 
     @property
     def tool_names(self) -> list[str]:

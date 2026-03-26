@@ -21,6 +21,9 @@ _TOOL_RESULT_MAX_CHARS = 50000
 logger = logging.getLogger(__name__)
 
 
+# Maximum consecutive same-tool calls before blocking (increased from 3 to 5)
+_MAX_CONSECUTIVE_SAME_TOOL = 5
+
 @dataclass
 class AgentLoopConfig:
     """Configuration for AgentLoop."""
@@ -301,34 +304,48 @@ class AgentLoop:
                 break
 
             # Execute tool calls
-            # Check for loop BEFORE adding assistant message (prevents inconsistent state)
+            # Improved loop detection - only trigger when exact same tool+parameters repeat
             if tool_calls:
                 current_tools = [tc.get('function', {}).get('name') for tc in tool_calls]
-                recent_tool_calls.extend(current_tools)
-                if len(recent_tool_calls) > 10:
-                    recent_tool_calls = recent_tool_calls[-10:]
 
-                # Improved loop detection: check for consecutive duplicate tool calls
-                # Count consecutive occurrences of each tool at the end of recent_tool_calls
+                # Build call signatures for this iteration (tool name + arguments hash)
+                current_call_signatures = []
+                for tc in tool_calls:
+                    tool_name = tc.get('function', {}).get('name')
+                    args = tc.get('function', {}).get('arguments', '{}')
+                    # Create signature: tool_name + hash of args
+                    import hashlib
+                    args_hash = hashlib.md5(args.encode('utf-8')).hexdigest()[:8]
+                    current_call_signatures.append(f"{tool_name}:{args_hash}")
+
+                # Add to recent calls history
+                recent_tool_calls.extend(current_call_signatures)
+                if len(recent_tool_calls) > 20:  # Keep more history for better detection
+                    recent_tool_calls = recent_tool_calls[-20:]
+
+                # Check for exact duplicate calls (same tool + same arguments)
                 loop_detected = False
                 looped_tool = None
+                consecutive_count = 0
 
-                # Build a dictionary tracking consecutive counts for all tools
-                for tool_name in set(current_tools):
-                    consecutive_count = 0
-                    # Iterate backwards through recent_tool_calls
+                # Only check the last few signatures for consecutive duplicates
+                for i in range(len(current_call_signatures)):
+                    sig = current_call_signatures[i]
+                    count = 0
+                    # Count how many times this signature appears consecutively at the end
                     for call in reversed(recent_tool_calls):
-                        if call == tool_name:
-                            consecutive_count += 1
+                        if call == sig:
+                            count += 1
                         else:
-                            # Stop counting when we hit a different tool
                             break
 
-                    # If a tool has been called 3+ times consecutively, trigger loop detection
-                    if consecutive_count >= 3:
-                        logger.warning(f"Detected tool loop: {tool_name} called {consecutive_count} times consecutively")
+                    # Only trigger if same tool+params repeats many times (5+)
+                    if count >= _MAX_CONSECUTIVE_SAME_TOOL:
+                        tool_name = sig.split(':')[0]
+                        logger.warning(f"Detected exact tool loop: {tool_name} called {count} times with same parameters")
                         looped_tool = tool_name
                         loop_detected = True
+                        consecutive_count = count
                         break
 
                 if loop_detected:
@@ -339,16 +356,14 @@ class AgentLoop:
                     messages.append(assistant_msg)
                     session.add_message(assistant_msg)
 
-                    # Add mock tool result messages to maintain message flow consistency
-                    # This prevents the model from being confused by missing tool results
+                    # Add tool result messages indicating tools were blocked
                     for tool_call in tool_calls:
                         tool_name = tool_call.get("function", {}).get("name")
                         tool_call_id = tool_call.get("id", "")
 
-                        # Create a mock result indicating the tool was blocked
                         mock_result = (
-                            f"[工具执行被阻止] 检测到工具 '{tool_name}' 已被连续调用，为防止无限循环已停止执行。\n"
-                            f"请检查对话历史中之前的工具调用结果来获取所需信息。"
+                            f"[工具执行被阻止] 检测到工具 '{tool_name}' 已被连续调用 {consecutive_count} 次。\n"
+                            f"为防止无限循环，工具执行已停止。请基于之前的工具结果回答问题。"
                         )
 
                         messages.append({
@@ -364,44 +379,53 @@ class AgentLoop:
                             "content": mock_result
                         })
 
-                    # Add system message about loop detection
-                    system_content = (
-                        f"[停止工具执行] 检测到工具 '{looped_tool}' 已被连续调用 {consecutive_count} 次，为防止无限循环已停止执行。\n\n"
-                        f"重要说明：本次工具调用已被拦截，没有执行，因此没有新的工具结果。\n\n"
-                        f"请检查对话历史中**之前**的工具调用结果，基于那些信息来回答用户的问题。\n\n"
-                        f"如果之前的信息足以回答，请直接给出答案。\n"
-                        f"如果之前的信息不足，请明确告诉用户缺少什么信息。\n\n"
-                        f"严禁：不要继续调用任何工具。"
-                    )
+                    # Add system message - CRITICAL: enforce no tool calls
                     messages.append({
                         "role": "system",
-                        "content": system_content
+                        "content": (
+                            f"[CRITICAL] Tool execution stopped due to detected loop.\n\n"
+                            f"Tool '{looped_tool}' was called {consecutive_count} times consecutively.\n"
+                            f"These tool calls were NOT executed.\n\n"
+                            f"IMPORTANT: The above tool results are MOCK results indicating blocking.\n"
+                            f"You MUST answer based on ACTUAL tool results from EARLIER in this conversation.\n\n"
+                            f"STRICTLY PROHIBITED: Do NOT call any more tools. Provide a direct answer now."
+                        )
                     })
                     session.add_message({
                         "role": "system",
-                        "content": system_content
+                        "content": (
+                            f"[CRITICAL] Tool execution stopped due to detected loop.\n\n"
+                            f"Tool '{looped_tool}' was called {consecutive_count} times consecutively.\n"
+                            f"These tool calls were NOT executed.\n\n"
+                            f"IMPORTANT: The above tool results are MOCK results indicating blocking.\n"
+                            f"You MUST answer based on ACTUAL tool results from EARLIER in this conversation.\n\n"
+                            f"STRICTLY PROHIBITED: Do NOT call any more tools. Provide a direct answer now."
+                        )
                     })
 
-                    # Immediately call LLM without tools to get final response
+                    # Save session and get final response WITHOUT tools
+                    self.session_manager.save_session(session)
+                    self._schedule_memory_consolidation(session)
+
+                    # Call LLM one final time with tools explicitly disabled
                     try:
                         final_response = await self.provider.chat(messages=messages, tools=None)
                         final_content = final_response.get("content", "")
                         if final_content and final_content.strip():
-                            assistant_response = final_content
                             # Add final assistant message to session
                             final_msg = {"role": "assistant", "content": final_content}
                             messages.append(final_msg)
                             session.add_message(final_msg)
+                            self.session_manager.save_session(session)
+                            return final_content
                         else:
-                            assistant_response = f"检测到工具 '{looped_tool}' 重复调用已停止。由于没有新的工具结果，请检查之前的输出或提供更多信息。"
+                            return f"检测到工具 '{looped_tool}' 重复调用 {consecutive_count} 次已停止。请检查之前的工具结果或提供更多信息。"
                     except Exception as e:
                         logger.error(f"Failed to get final response after loop detection: {e}")
-                        assistant_response = f"检测到工具 '{looped_tool}' 重复调用已停止。请检查之前的输出或提供更多信息。"
+                        return f"检测到工具 '{looped_tool}' 重复调用已停止。请检查之前的输出或提供更多信息。"
 
-                    # Save session and return
-                    self.session_manager.save_session(session)
-                    self._schedule_memory_consolidation(session)
-                    return assistant_response
+            # No loop detected - proceed with normal tool execution
+            # Add assistant message to messages
             assistant_msg = {"role": "assistant", "content": content}
             if tool_calls:
                 assistant_msg["tool_calls"] = tool_calls

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gis-agent"
+version = "1.0.0"
+description = "AI-powered GIS data analysis agent with autonomous execution capabilities"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "GIS Agent Team", email = "admin@gis-agent.com"}
+]
+keywords = ["gis", "agent", "ai", "llm", "geospatial", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.6",
+    "anthropic>=0.18.0",
+    "openai>=1.3.0",
+    "dashscope>=1.17.0",
+    "geopandas>=0.14.0",
+    "fiona>=1.9.5",
+    "shapely>=2.0.0",
+    "rasterio>=1.3.8",
+    "pyproj>=3.6.0",
+    "pillow>=10.0.0",
+    "pytesseract>=0.3.10",
+    "pdfplumber>=0.9.0",
+    "python-docx>=1.0.0",
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.25.0",
+    "ruff>=0.1.6",
+]
+
+[project.scripts]
+gis-agent = "main:main"
+
+[tool.setuptools]
+packages = ["core", "api", "session", "skills"]
+
+[tool.setuptools.package-data]
+"core" = ["*.json", "*.md"]
+"api" = ["*.json"]
+"skills" = ["**/*.md"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "--cov=core --cov=api --cov=session --cov=skills --cov-report=html --cov-report=term-missing"

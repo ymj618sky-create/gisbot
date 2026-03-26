@@ -1,18 +1,22 @@
 """
 GIS Agent - Main Application Entry Point
 
-FastAPI application for the GIS Agent system with nanobot architecture.
+FastAPI application for the GIS Agent system.
 """
 import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 
-from api.routes.agent_nanobot import router
-from core.config import load_config
+from api.routes.agent import router, reset_agent_loop
+from api.routes.workspace import router as workspace_router
+from api.routes.upload import router as upload_router
+from core.config import load_config, reset_timeout_config
 
 # Load environment variables
 load_dotenv()
@@ -35,16 +39,25 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"   Warning: Failed to load config: {e}")
 
+    # 预加载超时配置
+    from core.config import get_timeout_config
+    timeout_config = get_timeout_config()
+    print(f"   Timeout config: {timeout_config}")
+
     yield
 
     # Shutdown
     print("Shutting down GIS Agent API...")
+    # 重置单例，释放资源
+    reset_agent_loop()
+    reset_timeout_config()
+    print("   Agent loop and config cleaned up")
 
 
 # Create FastAPI application
 app = FastAPI(
     title="GIS Agent API",
-    description="AI-powered GIS data analysis agent with nanobot architecture",
+    description="AI-powered GIS data analysis agent",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -60,23 +73,40 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router, prefix="/api")
+app.include_router(workspace_router)
+app.include_router(upload_router, prefix="/api", tags=["upload"])
 
-# Root endpoint
-@app.get("/")
+# Mount static files
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Mount uploads directory for accessing uploaded files
+uploads_dir = Path(__file__).parent / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
+# Mount workspace root directory for accessing workspace files
+workspace_dir = Path(__file__).parent / "workspace"
+workspace_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/workspace", StaticFiles(directory=str(workspace_dir)), name="workspace")
+
+# Root endpoint - serve chat interface
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    """Root endpoint with API information."""
-    return {
-        "name": "GIS Agent API",
-        "version": "1.0.0",
-        "status": "running",
-        "endpoints": {
-            "chat": "/api/nanobot/chat",
-            "stream": "/api/nanobot/stream/{channel}/{chat_id}",
-            "tools": "/api/nanobot/tools",
-            "skills": "/api/nanobot/skills",
-            "sessions": "/api/nanobot/sessions"
-        }
-    }
+    """Root endpoint with chat interface."""
+    html_path = Path(__file__).parent / "static" / "index.html"
+    if html_path.exists():
+        return html_path.read_text(encoding="utf-8")
+    return """
+    <html>
+        <head><title>GIS Agent API</title></head>
+        <body>
+            <h1>GIS Agent API</h1>
+            <p>API is running. See <a href="/docs">API Documentation</a></p>
+        </body>
+    </html>
+    """
 
 
 @app.get("/health")
@@ -91,7 +121,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8080,
         reload=True,
         log_level="info"
     )

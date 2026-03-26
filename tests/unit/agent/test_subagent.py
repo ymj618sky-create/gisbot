@@ -1,224 +1,172 @@
-"""Tests for Subagent System."""
+"""
+SubagentManager单元测试
 
+测试子Agent管理器的核心功能：
+- 子Agent创建和管理
+- 后台任务执行
+- 结果收集和通知
+- 超时和取消
+"""
 import pytest
-import tempfile
-from pathlib import Path
-from core.agent.subagent import SubagentManager, SubagentTask
-from core.tools.base import Tool
-from core.tools.registry import ToolRegistry
+import asyncio
+from datetime import datetime
+from core.agent.subagent import SubagentManager, SubagentTask, TaskStatus
 
 
-class MockTool(Tool):
-    """Mock tool for testing."""
+class TestSubagentTask:
+    """SubagentTask数据模型测试"""
 
-    def __init__(self, name: str = "mock_tool"):
-        self._name = name
+    def test_create_task(self):
+        """测试创建任务"""
+        task = SubagentTask(
+            task_id="task-123",
+            prompt="执行数据分析",
+            created_at=datetime.now()
+        )
+        assert task.task_id == "task-123"
+        assert task.prompt == "执行数据分析"
+        assert task.status == TaskStatus.PENDING
 
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def description(self) -> str:
-        return "Mock tool for testing"
-
-    @property
-    def parameters(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "input": {"type": "string"}
-            },
-            "required": ["input"]
-        }
-
-    async def execute(self, input: str, **kwargs) -> str:
-        return f"Processed: {input}"
-
-
-@pytest.mark.asyncio
-async def test_create_subagent_task():
-    """Test creating a subagent task"""
-    manager = SubagentManager(data_dir=Path.cwd())
-
-    task = await manager.create_task(
-        task_id="task123",
-        prompt="Analyze this data",
-        tool_names=["mock_tool"],
-        task_config={"max_iterations": 5}
-    )
-
-    assert task.id == "task123"
-    assert task.status == "pending"
-    assert task.prompt == "Analyze this data"
+    def test_task_with_result(self):
+        """测试带结果的任务"""
+        task = SubagentTask(
+            task_id="task-123",
+            prompt="执行数据分析",
+            status=TaskStatus.COMPLETED,
+            result="分析完成",
+            created_at=datetime.now()
+        )
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "分析完成"
 
 
-@pytest.mark.asyncio
-async def test_execute_subagent_task():
-    """Test executing a subagent task"""
-    manager = SubagentManager(data_dir=Path.cwd())
-    tool_registry = ToolRegistry()
-    tool_registry.register(MockTool("mock_tool"))
+class TestSubagentManager:
+    """SubagentManager核心功能测试"""
 
-    task = await manager.create_task(
-        task_id="task456",
-        prompt="Test task",
-        tool_names=["mock_tool"]
-    )
+    @pytest.mark.asyncio
+    async def test_create_subagent_task(self, subagent_manager):
+        """测试创建子Agent任务"""
+        # Given - 任务描述
+        prompt = "分析landuse数据"
 
-    await manager.execute_task(task, tool_registry)
+        # When - 创建任务
+        task_id = await subagent_manager.spawn(prompt)
 
-    # Wait for task to complete
-    import asyncio
-    await asyncio.sleep(0.5)
+        # Then - 任务ID有效
+        assert task_id is not None
+        assert len(task_id) == 8  # UUID前8位
 
-    # Refresh task from storage
-    task = await manager.get_task("task456")
+    @pytest.mark.asyncio
+    async def test_get_task_status(self, subagent_manager):
+        """测试获取任务状态"""
+        # Given - 创建任务
+        prompt = "分析landuse数据"
+        task_id = await subagent_manager.spawn(prompt)
 
-    assert task.status in ["completed", "failed"]
-    if task.status == "completed":
-        assert task.result is not None
+        # When - 获取任务状态
+        task = await subagent_manager.get_task(task_id)
 
+        # Then - 返回任务对象
+        assert task is not None
+        assert task.task_id == task_id
+        assert task.prompt == prompt
 
-@pytest.mark.asyncio
-async def test_cancel_subagent_task():
-    """Test cancelling a subagent task"""
-    manager = SubagentManager(data_dir=Path.cwd())
+    @pytest.mark.asyncio
+    async def test_task_status_transitions(self, subagent_manager):
+        """测试任务状态转换"""
+        # Given - 创建任务
+        prompt = "分析landuse数据"
+        task_id = await subagent_manager.spawn(prompt)
 
-    task = await manager.create_task(
-        task_id="task789",
-        prompt="Long running task"
-    )
+        # Then - 初始状态为PENDING
+        task = await subagent_manager.get_task(task_id)
+        assert task.status == TaskStatus.PENDING
 
-    await manager.cancel_task(task.id)
+        # 模拟任务执行中
+        await subagent_manager._update_status(task_id, TaskStatus.RUNNING)
+        task = await subagent_manager.get_task(task_id)
+        assert task.status == TaskStatus.RUNNING
 
-    cancelled_task = await manager.get_task(task.id)
-    assert cancelled_task is not None
-    assert cancelled_task.status == "cancelled"
+        # 模拟任务完成
+        await subagent_manager._update_status(task_id, TaskStatus.COMPLETED, "完成")
+        task = await subagent_manager.get_task(task_id)
+        assert task.status == TaskStatus.COMPLETED
+        assert task.result == "完成"
 
+    @pytest.mark.asyncio
+    async def test_multiple_concurrent_tasks(self, subagent_manager):
+        """测试并发执行多个任务"""
+        # Given - 多个任务
+        prompts = [f"任务{i}" for i in range(5)]
 
-@pytest.mark.asyncio
-async def test_list_subagent_tasks():
-    """Test listing subagent tasks"""
-    manager = SubagentManager(data_dir=Path.cwd())
+        # When - 并发创建
+        task_ids = await asyncio.gather(*[
+            subagent_manager.spawn(p) for p in prompts
+        ])
 
-    await manager.create_task(task_id="task1", prompt="Task 1")
-    await manager.create_task(task_id="task2", prompt="Task 2")
+        # Then - 所有任务ID唯一
+        assert len(set(task_ids)) == len(task_ids)
+        assert len(task_ids) == 5
 
-    tasks = await manager.list_tasks()
+    @pytest.mark.asyncio
+    async def test_cancel_task(self, subagent_manager):
+        """测试取消任务"""
+        # Given - 创建任务
+        task_id = await subagent_manager.spawn("分析数据")
 
-    assert len(tasks) >= 2
-    task_ids = [t.id for t in tasks]
-    assert "task1" in task_ids
-    assert "task2" in task_ids
+        # When - 取消任务
+        await subagent_manager.cancel(task_id)
 
+        # Then - 任务状态为CANCELLED
+        task = await subagent_manager.get_task(task_id)
+        assert task.status == TaskStatus.CANCELLED
 
-@pytest.mark.asyncio
-async def test_subagent_task_with_tools():
-    """Test subagent task with restricted tools"""
-    manager = SubagentManager(data_dir=Path.cwd())
-    tool_registry = ToolRegistry()
+    @pytest.mark.asyncio
+    async def test_cleanup_completed_tasks(self, subagent_manager):
+        """测试清理已完成任务"""
+        # Given - 创建多个任务
+        task_ids = []
+        for i in range(3):
+            tid = await subagent_manager.spawn(f"任务{i}")
+            task_ids.append(tid)
+            # 标记为完成
+            await subagent_manager._update_status(tid, TaskStatus.COMPLETED, f"结果{i}")
 
-    # Register multiple tools
-    tool_registry.register(MockTool("tool1"))
-    tool_registry.register(MockTool("tool2"))
-    tool_registry.register(MockTool("tool3"))
+        # When - 清理已完成任务
+        await subagent_manager.cleanup_completed()
 
-    # Create task with only specific tools
-    task = await manager.create_task(
-        task_id="task_tools",
-        prompt="Use tool1",
-        tool_names=["tool1"]  # Only tool1 allowed
-    )
+        # Then - 已完成任务被移除
+        for tid in task_ids:
+            task = await subagent_manager.get_task(tid)
+            assert task is None
 
-    await manager.execute_task(task, tool_registry)
+    @pytest.mark.asyncio
+    async def test_get_all_tasks(self, subagent_manager):
+        """测试获取所有任务"""
+        # Given - 创建多个任务
+        await subagent_manager.spawn("任务1")
+        await subagent_manager.spawn("任务2")
+        await subagent_manager.spawn("任务3")
 
-    # Wait for task to complete
-    import asyncio
-    await asyncio.sleep(0.5)
+        # When - 获取所有任务
+        tasks = await subagent_manager.get_all_tasks()
 
-    # Refresh task from storage
-    task = await manager.get_task("task_tools")
+        # Then - 返回所有任务
+        assert len(tasks) == 3
 
-    # Task should complete successfully
-    assert task.status in ["completed", "failed"]
+    @pytest.mark.asyncio
+    async def test_task_timeout(self):
+        """测试任务超时"""
+        # Given - 创建超时时间为0.1秒的管理器
+        manager = SubagentManager(timeout=0.1)
+        task_id = await manager.spawn("长时间任务")
 
+        # When - 等待超时
+        await asyncio.sleep(0.3)
 
-@pytest.mark.asyncio
-async def test_subagent_task_with_max_iterations():
-    """Test subagent task respects max iterations"""
-    manager = SubagentManager(data_dir=Path.cwd())
-    tool_registry = ToolRegistry()
+        # Then - 任务状态为TIMEOUT
+        task = await manager.get_task(task_id)
+        assert task.status == TaskStatus.TIMEOUT
 
-    task = await manager.create_task(
-        task_id="task_iter",
-        prompt="Test",
-        tool_names=[],
-        task_config={"max_iterations": 3}
-    )
-
-    # Execute should respect max_iterations
-    await manager.execute_task(task, tool_registry)
-
-    # Wait for task to complete
-    import asyncio
-    await asyncio.sleep(0.5)
-
-    # Refresh task from storage
-    task = await manager.get_task("task_iter")
-
-    assert task.status in ["completed", "failed", "cancelled"]
-
-
-def test_subagent_task_serialization():
-    """Test subagent task can be serialized"""
-    task = SubagentTask(
-        task_id="task999",
-        prompt="Test prompt",
-        tool_names=["tool1", "tool2"],
-        status="pending"
-    )
-
-    data = task.to_dict()
-
-    assert data["id"] == "task999"
-    assert data["prompt"] == "Test prompt"
-    assert data["status"] == "pending"
-    assert data["tool_names"] == ["tool1", "tool2"]
-
-
-def test_subagent_task_deserialization():
-    """Test subagent task can be deserialized"""
-    data = {
-        "id": "task888",
-        "prompt": "Test prompt",
-        "tool_names": ["tool1"],
-        "status": "completed",
-        "result": "Task result",
-        "error": None,
-        "created_at": "2026-03-21T00:00:00",
-        "updated_at": "2026-03-21T00:01:00"
-    }
-
-    task = SubagentTask.from_dict(data)
-
-    assert task.id == "task888"
-    assert task.prompt == "Test prompt"
-    assert task.status == "completed"
-    assert task.result == "Task result"
-
-
-@pytest.mark.asyncio
-async def test_subagent_task_cleanup():
-    """Test cleaning up old subagent tasks"""
-    manager = SubagentManager(data_dir=Path.cwd())
-
-    # Create old tasks
-    import time
-    await manager.create_task(task_id="old_task1", prompt="Old task")
-    await manager.create_task(task_id="old_task2", prompt="Old task")
-
-    # Clean up tasks older than 0 days (all)
-    cleaned = await manager.cleanup_old_tasks(days=0)
-
-    assert cleaned >= 0
+        # 清理
+        await manager.shutdown()

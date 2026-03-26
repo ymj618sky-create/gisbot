@@ -14,6 +14,7 @@ from core.tools.data.write import WriteDataTool
 from core.tools.data.convert import ConvertDataTool
 from core.tools.data.raster import ReadRasterTool, WriteRasterTool, ConvertRasterTool
 from core.tools.gis.proximity import BufferTool
+from core.tools.gis.clip import ClipTool
 from core.tools.system import (
     ListFilesTool,
     ReadFileTool,
@@ -37,6 +38,7 @@ from core.tools.arcpy import (
 )
 from core.tools.spawn import SpawnTool
 from core.tools.message import MessageTool
+from core.tools.file_analysis import ReadImageTool, ReadDocumentTool, ParseTableTool
 from core.providers.factory import create_provider
 from session.manager import SessionManager
 from config import settings
@@ -59,9 +61,9 @@ def get_agent_loop() -> AgentLoop:
     """获取 Agent Loop 实例（单例）"""
     global _agent_loop
     if _agent_loop is None:
-        # Use project root as workspace (not the workspace subdirectory)
-        # This allows LLM to use paths like 'workspace/file.py' correctly
-        workspace = Path.cwd()
+        # Use workspace subdirectory as the main workspace
+        project_root = Path.cwd()
+        workspace = project_root / "workspace"
         # Ensure workspace directory exists
         workspace.mkdir(parents=True, exist_ok=True)
         data_dir = workspace / "data"
@@ -107,6 +109,7 @@ def get_agent_loop() -> AgentLoop:
         tool_registry.register(WriteDataTool(workspace))
         tool_registry.register(ConvertDataTool(workspace))
         tool_registry.register(BufferTool())
+        tool_registry.register(ClipTool())
 
         # Register raster tools
         tool_registry.register(ReadRasterTool(workspace))
@@ -180,6 +183,11 @@ def get_agent_loop() -> AgentLoop:
         # Register agent tools
         tool_registry.register(SpawnTool(workspace))
         tool_registry.register(MessageTool(workspace))
+
+        # Register file analysis tools
+        tool_registry.register(ReadImageTool())
+        tool_registry.register(ReadDocumentTool())
+        tool_registry.register(ParseTableTool())
 
         session_manager = SessionManager(data_dir=data_dir)
 
@@ -546,6 +554,17 @@ async def chat_stream_get(channel: str, chat_id: str, request: Request):
             yield f"data: {json.dumps({'type': 'error', 'message': 'Missing message parameter'}, ensure_ascii=False)}\n\n"
         return StreamingResponse(empty_generator(), media_type="text/event-stream")
 
+    # 从查询参数获取媒体文件路径
+    media_param = request.query_params.get("media", "")
+    media = None
+    if media_param:
+        media = [p.strip() for p in media_param.split(",") if p.strip()]
+        import logging
+        logging.getLogger(__name__).info(f"Received media parameter: {media_param}, parsed as: {media}")
+    else:
+        import logging
+        logging.getLogger(__name__).info("No media parameter received")
+
     async def event_generator():
         """生成 SSE 事件，带心跳机制和增强的错误处理"""
         try:
@@ -576,7 +595,7 @@ async def chat_stream_get(channel: str, chat_id: str, request: Request):
                         content=message,
                         channel=channel,
                         chat_id=chat_id,
-                        media=None,
+                        media=media,
                         on_progress=on_progress
                     )
                     progress_queue.put_nowait({"type": "response", "content": response})

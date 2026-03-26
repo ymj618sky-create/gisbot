@@ -55,7 +55,12 @@ class Project:
     @property
     def workspace_dir(self) -> Path:
         """项目工作目录"""
-        from .config import get_workspace_manager
+        # Note: This property requires WorkspaceManager to be initialized first
+        # Use get_workspace_manager() from this module's global scope
+        import sys
+        if 'core.workspace.manager' not in sys.modules:
+            raise RuntimeError("WorkspaceManager must be imported first to use workspace_dir property")
+        from core.workspace.manager import get_workspace_manager
         manager = get_workspace_manager()
         return manager.get_project_workspace(self.id)
 

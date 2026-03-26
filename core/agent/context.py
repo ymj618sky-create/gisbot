@@ -8,6 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+# Get project root directory (3 levels up from this file: core/agent/context.py -> core/agent -> core -> project_root)
+_PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
+
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
@@ -19,13 +22,17 @@ class ContextBuilder:
     _bootstrap_cache: dict[str, str] = {}
     _bootstrap_workspace: Path | None = None
 
-    def __init__(self, workspace: Path, memory_store: Optional[Any] = None):
+    def __init__(self, workspace: Path, config_dir: Optional[Path] = None, memory_store: Optional[Any] = None):
         self.workspace = workspace
+        # Default to config directory in project root
+        if config_dir is None:
+            config_dir = _PROJECT_ROOT / "config"
+        self.config_dir = config_dir
         self.memory_store = memory_store
 
     @classmethod
     def invalidate_bootstrap_cache(cls) -> None:
-        """Clear the bootstrap cache when workspace changes."""
+        """Clear the bootstrap cache when config or workspace changes."""
         cls._bootstrap_cache.clear()
         cls._bootstrap_workspace = None
 
@@ -151,12 +158,12 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
     def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace (cached)."""
-        # Check if workspace changed - invalidate cache if so
-        workspace_resolved = self.workspace.expanduser().resolve()
-        if ContextBuilder._bootstrap_workspace != workspace_resolved:
+        """Load all bootstrap files from config directory (cached)."""
+        # Check if config dir changed - invalidate cache if so
+        config_resolved = self.config_dir.expanduser().resolve()
+        if ContextBuilder._bootstrap_workspace != config_resolved:
             ContextBuilder._bootstrap_cache.clear()
-            ContextBuilder._bootstrap_workspace = workspace_resolved
+            ContextBuilder._bootstrap_workspace = config_resolved
 
         parts = []
         for filename in ContextBuilder.BOOTSTRAP_FILES:
@@ -165,8 +172,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 parts.append(ContextBuilder._bootstrap_cache[filename])
                 continue
 
-            # Load from file
-            file_path = self.workspace / filename
+            # Load from config directory
+            file_path = self.config_dir / filename
             if file_path.exists():
                 content = file_path.read_text(encoding="utf-8")
                 formatted = f"## {filename}\n\n{content}"
@@ -202,24 +209,65 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         self, text: str, media: list[str] | None
     ) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         if not media:
+            logger.debug("No media files provided")
             return text
-        images = []
+
+        logger.info(f"Processing media files: {media}")
+
+        # Build media information text
+        media_info_parts = []
+        image_content = []
+        non_image_files = []
+
         for path in media:
+            # Resolve path relative to workspace
             p = Path(path)
+            if not p.is_absolute():
+                p = self.workspace / p
+
+            logger.debug(f"Checking file: {p}, exists: {p.is_file()}")
+
             if not p.is_file():
+                non_image_files.append(f"  - {path} (文件不存在)")
                 continue
-            raw = p.read_bytes()
-            mime = mimetypes.guess_type(path)[0]
-            if not mime or not mime.startswith("image/"):
-                continue
-            b64 = base64.b64encode(raw).decode()
-            images.append(
-                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
-            )
-        if not images:
-            return text
-        return images + [{"type": "text", "text": text}]
+
+            # Check if it's an image
+            mime = mimetypes.guess_type(str(p))[0]
+            logger.debug(f"File MIME type: {mime}")
+
+            if mime and mime.startswith("image/"):
+                # Add to base64 images list for LLM
+                raw = p.read_bytes()
+                b64 = base64.b64encode(raw).decode()
+                image_content.append(
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+                )
+                media_info_parts.append(f"  - {path} (图片, {p.stat().st_size} 字节)")
+                logger.info(f"Added image to message: {path}")
+            else:
+                non_image_files.append(f"  - {path} ({mime or '未知格式'}, {p.stat().st_size} 字节)")
+                logger.info(f"Added non-image file: {path}")
+
+        # Build message with media information
+        user_text = text
+        if media_info_parts or non_image_files:
+            user_text = f"{text}\n\n**本次对话上传的文件:**\n"
+            if media_info_parts:
+                user_text += "\n**图片文件:**\n" + "\n".join(media_info_parts)
+            if non_image_files:
+                user_text += "\n**其他文件 (使用 read_image/read_document/parse_table 工具读取):**\n" + "\n".join(non_image_files)
+
+        if not image_content:
+            logger.debug("No images to send to LLM")
+            return user_text
+
+        logger.info(f"Sending {len(image_content)} image(s) to multimodal LLM")
+        # Return images + text for multimodal LLM
+        return image_content + [{"type": "text", "text": user_text}]
 
     def add_tool_result(
         self,

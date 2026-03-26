@@ -1,5 +1,6 @@
 """Proximity analysis tools."""
 
+from pathlib import Path
 from typing import Any
 from core.tools.base import Tool, GISError, EmptyResultError
 
@@ -7,13 +8,16 @@ from core.tools.base import Tool, GISError, EmptyResultError
 class BufferTool(Tool):
     """Create buffer zones around features."""
 
+    def __init__(self, workspace: Path | None = None):
+        self.workspace = workspace or Path.cwd()
+
     @property
     def name(self) -> str:
         return "buffer"
 
     @property
     def description(self) -> str:
-        return "Create a buffer zone around input features at a specified distance."
+        return "Create a buffer zone around input features at a specified distance. Input is GeoJSON string, output is returned as GeoJSON."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -62,9 +66,9 @@ class BufferTool(Tool):
             else:  # meter
                 distance_meters = distance
 
-            # Ensure CRS is set (default to WGS84 if not set)
+            # Ensure CRS is set (default to CGCS2000 zone 40 if not set)
             if gdf.crs is None:
-                gdf.crs = "EPSG:4326"
+                gdf.crs = "EPSG:4528"
 
             # Reproject to appropriate CRS for distance calculations if needed
             if gdf.crs.is_geographic:
@@ -79,33 +83,21 @@ class BufferTool(Tool):
                 gdf_proj = gdf
 
             # Create buffer
-            buffered = gdf_proj.geometry.buffer(distance_meters)
+            gdf_buffered = gdf_proj.buffer(distance_meters)
+
+            # Convert back to original CRS if we projected
+            if gdf.crs.is_geographic:
+                gdf_buffered = gdf_buffered.to_crs(gdf.crs)
+            else:
+                gdf_buffered = gdf_buffered
 
             # Create result GeoDataFrame
-            result_gdf = gpd.GeoDataFrame(
-                {"original_index": gdf.index, "buffer_distance": distance_meters},
-                geometry=buffered,
-                crs=gdf_proj.crs
-            )
+            gdf_result = gpd.GeoDataFrame(geometry=gdf_buffered, crs=gdf.crs)
 
-            # Calculate buffer areas in square kilometers
-            result_gdf["buffer_area_sqkm"] = result_gdf.geometry.area / 1_000_000
-            total_area = result_gdf["buffer_area_sqkm"].sum()
+            # Return as GeoJSON
+            return gdf_result.to_json()
 
-            # Revert to original CRS for consistency
-            result_gdf = result_gdf.to_crs(gdf.crs)
-
-            return f"""Successfully created buffer zones:
-- Input features: {len(gdf)}
-- Buffer distance: {distance} {unit}
-- Total buffer area: {total_area:.2f} km²
-- CRS: {gdf.crs}"""
-
-        except EmptyResultError:
-            raise
-        except json.JSONDecodeError:
-            return "Error: Invalid GeoJSON data. Please provide valid JSON string."
         except ImportError:
             return "Error: geopandas library is required. Install with: pip install geopandas"
         except Exception as e:
-            raise GISError(f"Buffer operation failed: {str(e)}")
+            return f"Error creating buffer: {str(e)}"
