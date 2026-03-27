@@ -18,7 +18,7 @@
     "default_provider": "dashscope",
     "dashscope": {
       "enabled": true,
-      "api_key_env": "DASHSCOPE_API_KEY",
+      "api_key_env": "your-dashscope-api-key-here",
       "base_url": "https://coding.dashscope.aliyuncs.com/v1",
       "models": {
         "qwen3_5_plus": {
